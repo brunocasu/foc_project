@@ -8,7 +8,14 @@
 #include <netdb.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+ 
+#include <limits.h> // for INT_MAX
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509_vfy.h>
+
 #define FAIL    -1
+
 int OpenConnection(const char *hostname, int port)
 {
     int sd;
@@ -47,7 +54,8 @@ SSL_CTX* InitCTX(void)
     }
     return ctx;
 }
-void ShowCerts(SSL* ssl)
+
+X509 *ShowCerts(SSL* ssl)
 {
     X509 *cert;
     char *line;
@@ -65,7 +73,17 @@ void ShowCerts(SSL* ssl)
     }
     else
         printf("Info: No client certificates configured.\n");
+    
+    return cert;
 }
+
+void check_msg_authentication(unsigned char* clear_text, unsigned char* signed_text, X509* cert)
+{
+   
+    
+    
+}
+
 int main(int count, char *strings[])
 {
     SSL_CTX *ctx;
@@ -73,7 +91,7 @@ int main(int count, char *strings[])
     SSL *ssl;
     char buf[1024];
     char acClientRequest[1024] = {0};
-    int bytes;
+    int bytes = 1;
     char *hostname, *portnum;
     if ( count != 3 )
     {
@@ -98,16 +116,18 @@ int main(int count, char *strings[])
                  <Password>%s<Password>\
                  <\Body>";
         printf("Enter the User Name : ");
-        scanf("%6s",acUsername);
+        scanf("%16s",acUsername);
         printf("\n\nEnter the Password : ");
-        scanf("%6s",acPassword);
-        sprintf(acClientRequest, cpRequestMessage, acUsername,acPassword);   /* construct reply */
+        scanf("%16s",acPassword);
+        sprintf(acClientRequest, cpRequestMessage, acUsername, acPassword);   /* construct reply */
         printf("\n\nConnected with %s encryption\n", SSL_get_cipher(ssl));
         ShowCerts(ssl);        /* get any certs */
         SSL_write(ssl,acClientRequest, strlen(acClientRequest));   /* encrypt & send message */
-        bytes = SSL_read(ssl, buf, sizeof(buf)); /* get reply & decrypt */
-        buf[bytes] = 0;
-        printf("Received: \"%s\"\n", buf);
+        while(bytes>0){
+            bytes = SSL_read(ssl, buf, sizeof(buf)); /* get reply & decrypt */
+            buf[bytes] = 0;
+            printf("Received (%d): \"%s\"\n",bytes, buf);
+        }
         SSL_free(ssl);        /* release connection state */
     }
     close(server);         /* close socket */

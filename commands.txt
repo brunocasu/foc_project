@@ -1,3 +1,21 @@
-generate private and public keys with password 
-openssl genrsa -aes128 -passout pass:alicepswd -out privkey.pem 2048
-openssl rsa -in privkey.pem -passin pass:alicepswd -pubout -out rsa_key.pub
+A. build programs from C file
+
+gcc -Wall -o client  client_a.c -L/usr/lib -lssl -lcrypto
+gcc -Wall -o server server.c -L/usr/lib -lssl -lcrypto
+
+
+1. generate private and public keys with password  for users
+
+openssl genrsa -aes256 -passout pass:alicepwd -out privkey.pem 2048
+openssl rsa -in privkey.pem -passin pass:alicepwd -pubout -out alice_key.pub
+
+
+2. generate certificate and pub key for the server
+
+openssl genrsa -out MessageApp_key.pem 3072
+
+openssl req -x509 -new -nodes -key MessageApp_key.pem -sha256 -days 365 -out MessageApp_cert.pem
+
+-openssl req -x509 -nodes -days 365 -newkey rsa:1024 -keyout mycert.pem -out mycert.pem
+-openssl x509 -in TrustedCA_root_cert.pem -signkey MessageApp_key.pem -x509toreq -out MessageApp_cert.pem
+-openssl verify -verbose -CAFile TrustedCA_root_cert.pem MessageApp_cert.pem

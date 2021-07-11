@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 #include <errno.h>
 #include <unistd.h>
 #include <malloc.h>
@@ -10,6 +13,10 @@
 #include "openssl/ssl.h"
 #include "openssl/err.h"
 #define FAIL    -1
+
+void delay(int number_of_seconds);
+
+
 // Create the SSL socket and intialize the socket address structure
 int OpenListener(int port)
 {
@@ -49,7 +56,8 @@ SSL_CTX* InitServerCTX(void)
     SSL_CTX *ctx;
     OpenSSL_add_all_algorithms();  /* load & register all cryptos, etc. */
     SSL_load_error_strings();   /* load all error messages */
-    method = TLSv1_2_server_method();  /* create new server-method instance */
+    //method = TLSv1_2_server_method();  /* create new server-method instance */
+    method = TLS_server_method();
     ctx = SSL_CTX_new(method);   /* create new context from method */
     if ( ctx == NULL )
     {
@@ -219,8 +227,9 @@ void send_authentication_msg(SSL* ssl)
    // fclose(sgnt_file);
    // 
    // cout << "File '"<< clear_file_name << "' signed into file '" << sgnt_file_name << "'\n";
+   sleep(10);
    printf("message: %s\n", clear_buf);
-   printf("signed message: %s\n", sgnt_buf);
+   printf("signed message:\n %s\n", sgnt_buf);
    SSL_write(ssl, clear_buf, strlen(clear_buf));
    SSL_write(ssl, sgnt_buf, strlen(sgnt_buf));
    // deallocate buffers:
@@ -232,7 +241,17 @@ void send_authentication_msg(SSL* ssl)
 }
 
 
-
+void delay(int number_of_seconds)
+{
+    // Converting time into milli_seconds
+    int milli_seconds = 1000 * number_of_seconds;
+  
+    // Storing start time
+    clock_t start_time = clock();
+  
+    // looping till required time is not achieved
+    while (clock() < start_time + milli_seconds);
+}
 
 
 int main(int count, char *Argc[])

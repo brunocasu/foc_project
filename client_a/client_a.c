@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
 #include <malloc.h>
@@ -14,7 +15,12 @@
 #include <openssl/pem.h>
 #include <openssl/x509_vfy.h>
 
+//multithreading
+#include <pthread.h>
+
 #define FAIL    -1
+
+SSL *ssl;
 
 int OpenConnection(const char *hostname, int port)
 {
@@ -45,7 +51,8 @@ SSL_CTX* InitCTX(void)
     SSL_CTX *ctx;
     OpenSSL_add_all_algorithms();  /* Load cryptos, et.al. */
     SSL_load_error_strings();   /* Bring in and register error messages */
-    method = TLSv1_2_client_method();  /* Create new client-method instance */
+    //method = TLSv1_2_client_method();  /* Create new client-method instance */
+    method = TLS_client_method();
     ctx = SSL_CTX_new(method);   /* Create new context */
     if ( ctx == NULL )
     {
@@ -84,11 +91,38 @@ void check_msg_authentication(unsigned char* clear_text, unsigned char* signed_t
     
 }
 
+void *listen_server(void *vargp)
+{
+    int bytes = 0;
+    char buf[1024];
+    printf("Enter loop\n");
+    while(1){
+            //printf("waiting for msg...\n");
+            bytes = SSL_read(ssl, buf, sizeof(buf)); /* get reply & decrypt */            
+            if (bytes>0){
+                buf[bytes] = 0;
+                printf("Received (%d): \"%s\"\n",bytes, buf);
+            }
+        }
+        SSL_free(ssl);        /* release connection state */
+    
+}
+
+void *ping_loop(void *vargp)
+{
+    for(;;)
+    {
+        printf("Ping\n\n");
+        sleep(2);
+    }
+}
+
+
 int main(int count, char *strings[])
 {
     SSL_CTX *ctx;
     int server;
-    SSL *ssl;
+    //SSL *ssl;
     char buf[1024];
     char acClientRequest[1024] = {0};
     int bytes = 1;
@@ -123,10 +157,27 @@ int main(int count, char *strings[])
         printf("\n\nConnected with %s encryption\n", SSL_get_cipher(ssl));
         ShowCerts(ssl);        /* get any certs */
         SSL_write(ssl,acClientRequest, strlen(acClientRequest));   /* encrypt & send message */
-        while(bytes>0){
+        
+        pthread_t thread_id1, thread_id2;
+        printf("Before Thread\n");
+        pthread_create(&thread_id1, NULL, listen_server, NULL);
+        pthread_create(&thread_id2, NULL, ping_loop, NULL);
+        pthread_join(thread_id1, NULL);
+        pthread_join(thread_id2, NULL);
+        printf("After Thread\n");
+        for(;;)
+        {
+            printf("Ping\n\n");
+            sleep(2);
+        }
+        
+        //listen_server(ssl);
+        while(1){
+            //printf("waiting for msg...\n");
             bytes = SSL_read(ssl, buf, sizeof(buf)); /* get reply & decrypt */
             buf[bytes] = 0;
-            printf("Received (%d): \"%s\"\n",bytes, buf);
+            if (bytes>0){
+                printf("Received (%d): \"%s\"\n",bytes, buf);}
         }
         SSL_free(ssl);        /* release connection state */
     }

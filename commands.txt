@@ -1,6 +1,6 @@
 A. build programs from C file
 
-gcc -Wall -o client  client_a.c -L/usr/lib -lssl -lcrypto
+gcc -Wall -o client  client_a.c -L/usr/lib -lssl -lcrypto -lpthread
 gcc -Wall -o server server.c -L/usr/lib -lssl -lcrypto
 
 

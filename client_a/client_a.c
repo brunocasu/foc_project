@@ -1,26 +1,24 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-#include <malloc.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <resolv.h>
-#include <netdb.h>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
- 
-#include <limits.h> // for INT_MAX
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/x509_vfy.h>
+#include <stdio.h>                                                       
+#include <netdb.h>                                                       
+#include <netinet/in.h>                                                  
+#include <stdlib.h>                                                      
+#include <string.h>                                                      
+#include <unistd.h>                                                      
+#include <sys/socket.h>                                                  
+#include <sys/types.h>
+#include <arpa/inet.h>
 
-//multithreading
+#include <time.h>
+#include <malloc.h>
+#include <resolv.h>
 #include <pthread.h>
 
-#define FAIL    -1
+#include "openssl/ssl.h"
+#include "openssl/err.h"
 
-SSL *ssl;
+#define MAX_BUFF 80
+#define PORT 8081
+#define SA struct sockaddr
 
 int OpenConnection(const char *hostname, int port)
 {
@@ -45,139 +43,49 @@ int OpenConnection(const char *hostname, int port)
     }
     return sd;
 }
-SSL_CTX* InitCTX(void)
-{
-    SSL_METHOD *method;
-    SSL_CTX *ctx;
-    OpenSSL_add_all_algorithms();  /* Load cryptos, et.al. */
-    SSL_load_error_strings();   /* Bring in and register error messages */
-    //method = TLSv1_2_client_method();  /* Create new client-method instance */
-    method = TLS_client_method();
-    ctx = SSL_CTX_new(method);   /* Create new context */
-    if ( ctx == NULL )
-    {
-        ERR_print_errors_fp(stderr);
-        abort();
-    }
-    return ctx;
-}
 
-X509 *ShowCerts(SSL* ssl)
+void func(int sockfd)
 {
-    X509 *cert;
-    char *line;
-    cert = SSL_get_peer_certificate(ssl); /* get the server's certificate */
-    if ( cert != NULL )
-    {
-        printf("Server certificates:\n");
-        line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
-        printf("Subject: %s\n", line);
-        free(line);       /* free the malloc'ed string */
-        line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
-        printf("Issuer: %s\n", line);
-        free(line);       /* free the malloc'ed string */
-        X509_free(cert);     /* free the malloc'ed certificate copy */
-    }
-    else
-        printf("Info: No client certificates configured.\n");
-    
-    return cert;
-}
-
-void check_msg_authentication(unsigned char* clear_text, unsigned char* signed_text, X509* cert)
-{
-   
-    
-    
-}
-
-void *listen_server(void *vargp)
-{
-    int bytes = 0;
-    char buf[1024];
-    printf("Enter loop\n");
-    while(1){
-            //printf("waiting for msg...\n");
-            bytes = SSL_read(ssl, buf, sizeof(buf)); /* get reply & decrypt */            
-            if (bytes>0){
-                buf[bytes] = 0;
-                printf("Received (%d): \"%s\"\n",bytes, buf);
-            }
+    char buff[MAX_BUFF];
+    int n;
+    for (;;) {
+        bzero(buff, sizeof(buff));
+        printf("Enter the string : ");
+        n = 0;
+        while ((buff[n++] = getchar()) != '\n')
+            ;
+        write(sockfd, buff, sizeof(buff));
+        bzero(buff, sizeof(buff));
+        read(sockfd, buff, sizeof(buff));
+        printf("From Server : %s", buff);
+        if ((strncmp(buff, "exit", 4)) == 0) {
+            printf("Client Exit...\n");
+            break;
         }
-        SSL_free(ssl);        /* release connection state */
-    
-}
-
-void *ping_loop(void *vargp)
-{
-    for(;;)
-    {
-        printf("Ping\n\n");
-        sleep(2);
     }
 }
-
-
-int main(int count, char *strings[])
+  
+int main(int count, char *args[])
 {
-    SSL_CTX *ctx;
-    int server;
-    //SSL *ssl;
-    char buf[1024];
-    char acClientRequest[1024] = {0};
-    int bytes = 1;
-    char *hostname, *portnum;
+    char *hostname
+    int portnum;
     if ( count != 3 )
     {
-        printf("usage: %s <hostname> <portnum>\n", strings[0]);
+        printf("usage: %s <hostname> <portnum>\n", args[0]);
         exit(0);
     }
-    SSL_library_init();
-    hostname=strings[1];
-    portnum=strings[2];
-    ctx = InitCTX();
-    server = OpenConnection(hostname, atoi(portnum));
-    ssl = SSL_new(ctx);      /* create new SSL connection state */
-    SSL_set_fd(ssl, server);    /* attach the socket descriptor */
-    if ( SSL_connect(ssl) == FAIL )   /* perform the connection */
-        ERR_print_errors_fp(stderr);
-    else
+    hostname=args[1];  
+    portnum = atoi(args[2]); 
+    if (portnum > 65535 || portnum <= 0) // check if inserted port number is in range
     {
-        char acUsername[16] = {0};
-        char acPassword[16] = {0};
-        const char *cpRequestMessage = "<Body>\
-                               <UserName>%s<UserName>\
-                 <Password>%s<Password>\
-                 <\Body>";
-        printf("Enter the User Name : ");
-        scanf("%16s",acUsername);
-        printf("\n\nEnter the Password : ");
-        scanf("%16s",acPassword);
-        sprintf(acClientRequest, cpRequestMessage, acUsername, acPassword);   /* construct reply */
-        printf("\n\nConnected with %s encryption\n", SSL_get_cipher(ssl));
-        ShowCerts(ssl);        /* get any certs */
-        SSL_write(ssl,acClientRequest, strlen(acClientRequest));   /* encrypt & send message */
-        
-        pthread_t thread_id1, thread_id2;
-        printf("Before Thread\n");
-        pthread_create(&thread_id1, NULL, listen_server, NULL);
-        pthread_create(&thread_id2, NULL, ping_loop, NULL);
-        pthread_join(thread_id1, NULL);
-        pthread_join(thread_id2, NULL);
-        printf("After Thread\n");
-        for(;;);
-        
-        //listen_server(ssl);
-        while(1){
-            //printf("waiting for msg...\n");
-            bytes = SSL_read(ssl, buf, sizeof(buf)); /* get reply & decrypt */
-            buf[bytes] = 0;
-            if (bytes>0){
-                printf("Received (%d): \"%s\"\n",bytes, buf);}
-        }
-        SSL_free(ssl);        /* release connection state */
+        printf("Port Number %d is out of range\n", portnum);
+        exit(0);
     }
-    close(server);         /* close socket */
-    SSL_CTX_free(ctx);        /* release context */
-    return 0;
+    
+    int sockfd = OpenConnection(hostname, atoi(portnum));
+    // function for chat
+    func(sockfd);
+  
+    // close the socket
+    close(sockfd);
 } 

@@ -1,13 +1,13 @@
 A. build programs from C file
 
-gcc -Wall -o client  client_a.c -L/usr/lib -lssl -lcrypto -lpthread
-gcc -Wall -o server server.c -L/usr/lib -lssl -lcrypto -lpthread
+gcc -o server  server.c -lssl -lcrypto -lpthread
+gcc -o client  client_a.c -lssl -lcrypto -lpthread
 
 
 1. generate private and public keys with password  for users
 
 openssl genrsa -aes256 -passout pass:alicepwd -out privkey.pem 2048
-openssl rsa -in privkey.pem -passin pass:alicepwd -pubout -out alice_key.pub
+openssl rsa -in privkey.pem -passin pass:alicepwd -pubout -out alicekey.pem
 
 
 2. generate certificate and pub key for the server

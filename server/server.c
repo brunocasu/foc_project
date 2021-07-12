@@ -16,7 +16,7 @@
 #include "openssl/ssl.h"
 #include "openssl/err.h"
 
-#define MAX_BUFF 80                                                           
+#define MAX_BUFF 65535                                                           
 #define PORT 8081                                                        
 #define SA struct sockaddr
 #define MAX_CHANNELS    2
@@ -29,6 +29,7 @@ struct client_id {
 struct client_id usr_data[MAX_CHANNELS];
 int server_sockfd;
 pthread_mutex_t mutex_channel[MAX_CHANNELS];
+
 
                                                                          
 int MessageApp_OpenListener(int port)                                               
@@ -113,24 +114,76 @@ void *MessageApp_client_connect(void *vargp)
  
 }
 
+int MessageApp_handshake(int channel)
+{
+    char buff[MAX_BUFF];
+    char* tcp_msg;
+    int ret_val;
+    int msg_size;
+    
+    msg_size = read(usr_data[channel].connfd, buff, sizeof(buff));
+    if ((msg_size>0)&&(msg_size<MAX_BUFF))
+    {
+        tcp_msg = malloc(msg_size);
+        for (int i=0;i<msg_size;i++)
+            tcp_msg[i]=buff[i];
+    }
+    if(strcmp("hello",tcp_msg) != 0)
+        return 0;
+    
+    FILE* privkey_file = fopen("MessageApp_key.pem", "r");
+    if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
+    EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
+    fclose(privkey_file);
+    if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
+    
+    const EVP_MD* md = EVP_sha256();
+    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    unsigned char* sgnt_buf = (unsigned char*)malloc(EVP_PKEY_size(privkey));
+    if(sgnt_buf==NULL) {printf("Error: malloc returned NULL\n"); return 0;}
+    
+    ret_val = EVP_SignInit(md_ctx, md);
+    if(ret_val == 0){printf("Error: EVP_SignInit returned %d\n",ret_val); return 0;}
+    ret_val = EVP_SignUpdate(md_ctx, "hello", 5);
+    if(ret_val == 0){printf("Error: EVP_SignUpdate returned %d\n",ret_val); return 0;}
+    unsigned int sgnt_size;
+    ret_val = EVP_SignFinal(md_ctx, sgnt_buf, &sgnt_size, privkey);
+    if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
+    printf("Server Signature size %d\n", sgnt_size);
+    // delete the digest and the private key from memory:
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(privkey);
+    free(tcp_msg);
+    
+    // send signature
+    write(usr_data[channel].connfd, "hello", 5);
+    sleep(1);
+    int N = write(usr_data[channel].connfd, sgnt_buf, sgnt_size);
+    printf("Server Signature sent - Handshake Channel (%d)\n MSG sent (%d)\n%s", channel, N, sgnt_buf);
+    free(sgnt_buf);
+    
+    return 1;
+}
+
 
 // Function designed for chat between client and server.
 void* MessageApp_channel_0(void *vargp)
 {
     char buff[MAX_BUFF];
+    char* tcp_msg;
     int channel = 0;
     int n;
     int msg_size;
     int usrname_rec = 0;
     
     pthread_mutex_lock(&mutex_channel[0]);    
-    printf("Channel 0 Connected (Non-Secure)\nBegin Handshake...");
+    printf("Channel 0 Connected (Non-Secure)\nBegin Handshake...\n");
     
     // begin HANDSHAKE protocol
-    bzero(buff, MAX_BUFF);
-    msg_size = read(usr_data[channel].connfd, buff, sizeof(buff));
-    
-    
+    if (MessageApp_handshake(channel) !=1)
+        printf("Handshake FAILED...\n");
     
     // infinite loop for chat
     for (;;)
@@ -140,7 +193,7 @@ void* MessageApp_channel_0(void *vargp)
         // read the message from client and copy it in buffer
         msg_size = read(usr_data[channel].connfd, buff, sizeof(buff));
         // print buffer which contains the client contents
-        if (msg_size>0 && msg_size<65535)
+        if ((msg_size>0)&&(msg_size<MAX_BUFF))
         {
             if (usrname_rec==0){
                 usr_data[channel].username = malloc(msg_size);

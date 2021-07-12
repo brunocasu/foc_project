@@ -16,8 +16,7 @@
 #include "openssl/ssl.h"
 #include "openssl/err.h"
 
-#define MAX_BUFF 80
-#define PORT 8081
+#define MAX_BUFF 65535
 #define SA struct sockaddr
 
 int OpenConnection(const char *hostname, int port)
@@ -44,16 +43,42 @@ int OpenConnection(const char *hostname, int port)
     return sd;
 }
 
-void func(int sockfd)
+int func(int sockfd)
 {
     char buff[MAX_BUFF];
+    char* msg;
     int n;
+    int msg_size;
+    char* tcp_msg;
+    
+    // Begin Handshake
+    bzero(buff, sizeof(buff));
+    write(sockfd, "hello", 5);
+    
+    bzero(buff, sizeof(buff));
+    read(sockfd, buff, sizeof(buff));
+    if ((strncmp(buff, "hello", 5)) != 0) {
+        printf("Handshake fail\n");
+        return 0;
+    }
+    printf("Hello from server!\n");
+    bzero(buff, sizeof(buff));
+    msg_size = read(sockfd, buff, sizeof(buff));
+    if (msg_size>0)
+    {
+        tcp_msg = malloc(msg_size);
+        for (int i=0;i<msg_size;i++)
+            tcp_msg[i]=buff[i];
+    }    
+    printf("Signature received (%d): \n%s \n",msg_size, tcp_msg );
+    
+    
     for (;;) {
         bzero(buff, sizeof(buff));
         printf("Enter the string : ");
         n = 0;
-        while ((buff[n++] = getchar()) != '\n')
-            ;
+        while ((buff[n++] = getchar()) != '\n');
+            
         write(sockfd, buff, sizeof(buff));
         bzero(buff, sizeof(buff));
         read(sockfd, buff, sizeof(buff));
@@ -67,7 +92,7 @@ void func(int sockfd)
   
 int main(int count, char *args[])
 {
-    char *hostname
+    char *hostname; 
     int portnum;
     if ( count != 3 )
     {
@@ -82,7 +107,7 @@ int main(int count, char *args[])
         exit(0);
     }
     
-    int sockfd = OpenConnection(hostname, atoi(portnum));
+    int sockfd = OpenConnection(hostname, portnum);
     // function for chat
     func(sockfd);
   

@@ -165,11 +165,7 @@ int main(int count, char *strings[])
         pthread_join(thread_id1, NULL);
         pthread_join(thread_id2, NULL);
         printf("After Thread\n");
-        for(;;)
-        {
-            printf("Ping\n\n");
-            sleep(2);
-        }
+        for(;;);
         
         //listen_server(ssl);
         while(1){

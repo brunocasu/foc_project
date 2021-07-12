@@ -12,10 +12,17 @@
 #include <resolv.h>
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+
+//multithreading
+#include <pthread.h>
+
 #define FAIL    -1
 
-void delay(int number_of_seconds);
-
+uint16_t MessageApp_listening_port;
+int MessageApp_server;
+SSL *ssl[10];
+SSL_CTX *MessageApp_ctx;
+pthread_mutex_t mutex_channel[10];
 
 // Create the SSL socket and intialize the socket address structure
 int OpenListener(int port)
@@ -106,49 +113,55 @@ void ShowCerts(SSL* ssl)
     else
         printf("No certificates.\n");
 }
-void Servlet(SSL* ssl) /* Serve the connection -- threadable */
-{
-    char buf[1024] = {0};
-    int sd, bytes;
-    const char* ServerResponse="<\Body>\
-                               <Name>aticleworld.com</Name>\
-                 <year>1.5</year>\
-                 <BlogType>Embedede and c\c++<\BlogType>\
-                 <Author>amlendra<Author>\
-                 <\Body>";
-    const char *cpValidMessage = "<Body>\
-                               <UserName>alice<UserName>\
-                 <Password>alice<Password>\
-                 <\Body>";
-    if ( SSL_accept(ssl) == FAIL )     /* do SSL-protocol accept */
-        ERR_print_errors_fp(stderr);
-    else
-    {
-        ShowCerts(ssl);        /* get any certificates */
-        bytes = SSL_read(ssl, buf, sizeof(buf)); /* get request */
-        buf[bytes] = '\0';
-        printf("Client msg: \"%s\"\n", buf);
-        if ( bytes > 0 )
-        {
-            if(strcmp(cpValidMessage,buf) == 0)
-            {
-                SSL_write(ssl, ServerResponse, strlen(ServerResponse)); /* send reply */
-            }
-            else
-            {
-                SSL_write(ssl, "Invalid Message", strlen("Invalid Message")); /* send reply */
-            }
-        }
-        else
-        {
-            ERR_print_errors_fp(stderr);
-        }
-    }
-    send_authentication_msg(ssl);
-    sd = SSL_get_fd(ssl);       /* get socket connection */
-    SSL_free(ssl);         /* release SSL state */
-    close(sd);          /* close connection */
-}
+
+
+
+//void *Servlet(void *vargp) /* Serve the connection -- threadable */
+//{
+//    char buf[1024] = {0};
+//    int sd, bytes;
+//    const char* ServerResponse="<\Body>\
+//                               <Name>aticleworld.com</Name>\
+//                 <year>1.5</year>\
+//                 <BlogType>Embedede and c\c++<\BlogType>\
+//                 <Author>amlendra<Author>\
+//                 <\Body>";
+//    const char *cpValidMessage = "<Body>\
+//                               <UserName>alice<UserName>\
+//                 <Password>alice<Password>\
+//                 <\Body>";
+//        
+//        
+//    if ( SSL_accept(ssl) == FAIL )     /* do SSL-protocol accept */
+//        ERR_print_errors_fp(stderr);
+//    else
+//    {
+//        ShowCerts(ssl);        /* get any certificates */
+//        bytes = SSL_read(ssl, buf, sizeof(buf)); /* get request */
+//        buf[bytes] = '\0';
+//        printf("Client msg: \"%s\"\n", buf);
+//        if ( bytes > 0 )
+//        {
+//            if(strcmp(cpValidMessage,buf) == 0)
+//            {
+//                SSL_write(ssl, ServerResponse, strlen(ServerResponse)); /* send reply */
+//            }
+//            else
+//            {
+//                SSL_write(ssl, "Invalid Message", strlen("Invalid Message")); /* send reply */
+//            }
+//        }
+//        else
+//        {
+//            ERR_print_errors_fp(stderr);
+//        }
+//    }
+//    send_authentication_msg(ssl);
+//    sd = SSL_get_fd(ssl);       /* get socket connection */
+//    SSL_free(ssl);         /* release SSL state */
+//    close(sd);          /* close connection */
+//    for(;;);
+//}
 
 void send_authentication_msg(SSL* ssl)
 {
@@ -227,7 +240,7 @@ void send_authentication_msg(SSL* ssl)
    // fclose(sgnt_file);
    // 
    // cout << "File '"<< clear_file_name << "' signed into file '" << sgnt_file_name << "'\n";
-   sleep(10);
+   sleep(5);
    printf("message: %s\n", clear_buf);
    printf("signed message:\n %s\n", sgnt_buf);
    SSL_write(ssl, clear_buf, strlen(clear_buf));
@@ -236,61 +249,155 @@ void send_authentication_msg(SSL* ssl)
    //free(clear_buf);
    free(sgnt_buf);
 
-   return 0;
+   //return 0;
    
 }
 
-
-void delay(int number_of_seconds)
+int MessageApp_launch_param_check (int n_input, char* args[])
 {
-    // Converting time into milli_seconds
-    int milli_seconds = 1000 * number_of_seconds;
-  
-    // Storing start time
-    clock_t start_time = clock();
-  
-    // looping till required time is not achieved
-    while (clock() < start_time + milli_seconds);
+    int input_port;
+    
+    if (!isRoot())
+    {
+        printf("MessageApp server must run as sudo\n");
+        return 0;
+    }
+    
+    if (n_input != 2) // if inserted wrong amount of paramters
+    {
+        printf("ERROR wrong number of paramters\n");
+        return 0;
+    }
+    
+    input_port = atoi(args[1]); 
+    if (input_port > 65535 || input_port <= 0) // check if inserted port number is in range
+    {
+        printf("Port Number %d is out of range\n", input_port);
+        return 0;
+    }
+    // if no erros detected
+    MessageApp_listening_port = input_port;
+    SSL_library_init();
+    return 1;
+}
+
+void *MessageApp_socket_connect(void *vargp)
+{
+    int channel = 0;
+    pthread_mutex_lock(&mutex_channel[0]);
+    printf("mutex 0 locked...\n");
+    pthread_mutex_lock(&mutex_channel[1]);
+    printf("mutex 1 locked...\n");
+    while (1)
+    {        
+        struct sockaddr_in addr;
+        socklen_t len = sizeof(addr);
+                
+        printf("Waiting for client connection...\n");
+        int client = accept(MessageApp_server, (struct sockaddr*)&addr, &len);  /* accept connection as usual */
+        printf("Connection: %s:%d\nMessageApp channel(%d)\n", inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), channel);        
+        ssl[channel] = SSL_new(MessageApp_ctx); /* get new SSL state with context */
+        SSL_set_fd(ssl[channel], client);      /* set connection socket to SSL state */
+                
+        pthread_mutex_unlock(&mutex_channel[channel]);
+        //Servlet(ssl);         /* service connection */
+        channel++;
+    }
+ 
+}
+
+void *MessageApp_channel_0(void *vargp)
+{
+    char buf[1024] = {0};
+    int sd, bytes;
+    const char* ServerResponse="<\Body>\
+                               <Name>aticleworld.com</Name>\
+                 <year>1.5</year>\
+                 <BlogType>Embedede and c\c++<\BlogType>\
+                 <Author>amlendra<Author>\
+                 <\Body>";
+    const char *cpValidMessage = "<Body>\
+                               <UserName>alice<UserName>\
+                 <Password>alice<Password>\
+                 <\Body>";
+        
+    printf("CHANNEL 0 mutex LOCK\n");
+    pthread_mutex_lock(&mutex_channel[0]);    
+    printf("CHANNEL 0 mutex UNLOCK\n");  
+    
+    if ( SSL_accept(ssl[0]) == FAIL )     /* do SSL-protocol accept */
+        ERR_print_errors_fp(stderr);
+    else
+    {
+        //ShowCerts(ssl);        /* get any certificates */
+        printf("Server wainting message in CHANNEL 0...\n");
+        bytes = SSL_read(ssl[0], buf, sizeof(buf)); /* get request */
+        buf[bytes] = '\0';
+        printf("Client msg: \"%s\"\n", buf);
+        if ( bytes > 0 )
+        {
+            if(strcmp(cpValidMessage,buf) == 0)
+            {
+                SSL_write(ssl[0], ServerResponse, strlen(ServerResponse)); /* send reply */
+            }
+            else
+            {
+                SSL_write(ssl[0], "Invalid Message", strlen("Invalid Message")); /* send reply */
+            }
+        }
+        else
+        {
+            ERR_print_errors_fp(stderr);
+        }
+    }
+    send_authentication_msg(ssl[0]);
+    sd = SSL_get_fd(ssl[0]);       /* get socket connection */
+    SSL_free(ssl[0]);         /* release SSL state */
+    close(sd);          /* close connection */
+    printf("closed connection CHANNEL 0\n");
+    for(;;);
+}
+void *MessageApp_channel_1(void *vargp)
+{
+    printf("CHANNEL 1 mutex LOCK\n");    
+    pthread_mutex_lock(&mutex_channel[1]);
+    printf("CHANNEL 1 mutex UNLOCK\n");
+    printf("Server wainting message in CHANNEL 1...\n");
+    for(;;);
+    
 }
 
 
-int main(int count, char *Argc[])
+int main(int n_input, char *input_args[])
 {
-    SSL_CTX *ctx;
-    int server;
-    char *portnum;
-//Only root user have the permsion to run the server
-    if(!isRoot())
+   
+    if ( MessageApp_launch_param_check(n_input, input_args) == 1)
+        printf("MessageApp Server launched !! connection port: %d\n", MessageApp_listening_port);
+    else
     {
-        printf("This program must be run as root/sudo user!!");
+        printf("MessageApp launch FAILED\n");
         exit(0);
     }
-    if ( count != 2 )
-    {
-        printf("Usage: %s <portnum>\n", Argc[0]);
-        exit(0);
-    }
+    
     // Initialize the SSL library
-    SSL_library_init();
-    portnum = Argc[1];
-    ctx = InitServerCTX();        /* initialize SSL */
-    LoadCertificates(ctx, "MessageApp_cert.pem", "MessageApp_key.pem"); /* load certs */
-    server = OpenListener(atoi(portnum));    /* create server socket */
-    while (1)
-    {
-        struct sockaddr_in addr;
-        socklen_t len = sizeof(addr);
-        SSL *ssl;
-        int client = accept(server, (struct sockaddr*)&addr, &len);  /* accept connection as usual */
-        printf("Connection: %s:%d\n",inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));        
-        ssl = SSL_new(ctx);              /* get new SSL state with context */
-        SSL_set_fd(ssl, client);      /* set connection socket to SSL state */
+    MessageApp_ctx = InitServerCTX();        /* initialize SSL */
+
+    LoadCertificates(MessageApp_ctx, "MessageApp_cert.pem", "MessageApp_key.pem"); /* load certs */
+
+    MessageApp_server = OpenListener(MessageApp_listening_port);    /* create server socket */
+    pthread_t thread_id[3];    
+
+    pthread_create(&thread_id[0], NULL, MessageApp_socket_connect, NULL);
+    pthread_create(&thread_id[1], NULL, MessageApp_channel_0, NULL);
+    pthread_create(&thread_id[2], NULL, MessageApp_channel_1, NULL);
+    
+    pthread_join(thread_id[0], NULL);
+    pthread_join(thread_id[1], NULL);
+    pthread_join(thread_id[2], NULL);
+    //Servlet(ssl);         /* service connection */
+
+    for(;;);    
         
-        Servlet(ssl);         /* service connection */
-        
-        
-        
-    }
-    close(server);          /* close server socket */
-    SSL_CTX_free(ctx);         /* release context */
+    //close(server);          /* close server socket */
+    //SSL_CTX_free(ctx);         /* release context */
 } 

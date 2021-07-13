@@ -15,6 +15,9 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509_vfy.h>
 
 #define MAX_BUFF 65535                                                           
 #define PORT 8081                                                        

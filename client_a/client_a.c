@@ -15,6 +15,9 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509_vfy.h>
 
 #define MAX_BUFF 65535
 #define SA struct sockaddr
@@ -43,13 +46,12 @@ int OpenConnection(const char *hostname, int port)
     return sd;
 }
 
-int func(int sockfd)
+int ClientHandshake(int sockfd)
 {
     char buff[MAX_BUFF];
-    char* msg;
-    int n;
     int msg_size;
     char* tcp_msg;
+    int ret_val;
     
     // Begin Handshake
     bzero(buff, sizeof(buff));
@@ -61,7 +63,7 @@ int func(int sockfd)
         printf("Handshake fail\n");
         return 0;
     }
-    printf("Hello from server!\n");
+    printf("hello from server!\n");
     bzero(buff, sizeof(buff));
     msg_size = read(sockfd, buff, sizeof(buff));
     if (msg_size>0)
@@ -70,8 +72,44 @@ int func(int sockfd)
         for (int i=0;i<msg_size;i++)
             tcp_msg[i]=buff[i];
     }    
-    printf("Signature received (%d): \n%s \n",msg_size, tcp_msg );
+    printf("Server Signature received (%d): \n%s \n",msg_size, tcp_msg );
+    // open certificate
+    FILE* cert_file = fopen("MessageApp_cert.pem", "r");
+    if(cert_file==NULL){printf("Certificate File Open Error\n"); return 0;}
+    X509* cert = PEM_read_X509(cert_file, NULL, NULL, NULL);
+    fclose(cert_file);
+    if(cert==NULL){printf("Error: PEM_read_X509 returned NULL\n"); return 0;}
     
+    char* tmp = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
+    char* tmp2 = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+    printf("Certificate of %s\n issued by %s\n",tmp, tmp2);
+    free(tmp);
+    free(tmp2);
+    
+    const EVP_MD* md = EVP_sha256();
+    // create the signature context:
+    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_VerifyInit(md_ctx, md);
+    if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyUpdate(md_ctx, "hello", 5);  
+    if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyFinal(md_ctx, tcp_msg, msg_size, X509_get_pubkey(cert));
+    if(ret_val==1)
+        printf("Server Authenticated!\n");
+    else{
+        printf("Server Authentication FAILED (%d)\n", ret_val);
+        return 0;}
+    EVP_MD_CTX_free(md_ctx);
+    X509_free(cert);
+    return 1;
+}    
+    
+int func(int sockfd)
+{   
+    char buff[MAX_BUFF];
+    int n;
     
     for (;;) {
         bzero(buff, sizeof(buff));
@@ -108,6 +146,8 @@ int main(int count, char *args[])
     }
     
     int sockfd = OpenConnection(hostname, portnum);
+    
+    ClientHandshake(sockfd);
     // function for chat
     func(sockfd);
   

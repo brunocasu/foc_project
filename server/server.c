@@ -18,6 +18,8 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509_vfy.h>
+#include <openssl/rand.h>
+
 
 #define MAX_BUFF 65535                                                           
 #define PORT 8081                                                        
@@ -119,21 +121,24 @@ void *MessageApp_client_connect(void *vargp)
 
 int MessageApp_handshake(int channel)
 {
-    char buff[MAX_BUFF];
+    char* buff = malloc(MAX_BUFF);
     char* tcp_msg;
     int ret_val;
     int msg_size;
     
-    msg_size = read(usr_data[channel].connfd, buff, sizeof(buff));
+    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
     if ((msg_size>0)&&(msg_size<MAX_BUFF))
     {
         tcp_msg = malloc(msg_size);
         for (int i=0;i<msg_size;i++)
             tcp_msg[i]=buff[i];
     }
+    else {printf("Failed to receive hello from Client \n"); return 0;}
+    free(buff);
     if(strcmp("hello",tcp_msg) != 0)
         return 0;
     
+    /** BEGIN COMPUTE AND SEND SIGNATURE  */
     FILE* privkey_file = fopen("MessageApp_key.pem", "r");
     if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
     EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
@@ -155,7 +160,7 @@ int MessageApp_handshake(int channel)
     ret_val = EVP_SignFinal(md_ctx, sgnt_buf, &sgnt_size, privkey);
     if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
     printf("Server Signature size %d\n", sgnt_size);
-    // delete the digest and the private key from memory:
+    // delete the digest from memory:
     EVP_MD_CTX_free(md_ctx);
     EVP_PKEY_free(privkey);
     free(tcp_msg);
@@ -163,9 +168,60 @@ int MessageApp_handshake(int channel)
     // send signature
     write(usr_data[channel].connfd, "hello", 5);
     sleep(1);
-    int N = write(usr_data[channel].connfd, sgnt_buf, sgnt_size);
-    printf("Server Signature sent - Handshake Channel (%d)\n MSG sent (%d)\n%s", channel, N, sgnt_buf);
+    write(usr_data[channel].connfd, sgnt_buf, sgnt_size);
+    printf("Server Signature sent (%d) in Channel (%d)\n", sgnt_size, channel);
     free(sgnt_buf);
+    /** END COMPUTE AND SEND SIGNATURE  */
+    
+    // receive encrypted IV from client
+    buff = malloc(MAX_BUFF);
+    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
+    printf("Encrypted IV received (%d)\n",msg_size);
+    if ((msg_size>0)&&(msg_size<MAX_BUFF))
+    {
+        tcp_msg = malloc(msg_size);
+        for (int i=0;i<msg_size;i++)
+            tcp_msg[i]=buff[i];
+    }
+    else {printf("Failed to receive encrypted IV \n"); return 0;}
+    free(buff);
+    
+    /** BEGIN DECRYPT USERNAME  */
+    // tcp_msg <- IV encrypted by pubkey
+    // decrypt IV using privkey
+    privkey_file = fopen("MessageApp_key.pem", "r");
+    if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
+    privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
+    fclose(privkey_file);
+    if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
+
+    unsigned char *decrypted_msg;
+    size_t outlen;
+    // Decrypt Received Message using privkey
+    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(privkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
+    /* Determine buffer length */
+    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, tcp_msg, msg_size) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
+    
+    decrypted_msg = OPENSSL_malloc(outlen);
+    if (!decrypted_msg){printf("Malloc Failed for decrypted message\n"); return 0;}
+        
+    ret_val = EVP_PKEY_decrypt(ctx_p, decrypted_msg, &outlen, tcp_msg, msg_size);
+    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
+    
+    printf("DECRYPTED username: %s\n", decrypted_msg);
+    /** END DECRYPT USERNAME  */
+    
+    
+    
+ /* Decrypted data is outlen bytes written to buffer out */
+    
+    // seesion key = sha 256 (IV)
+    // encrypt "finish" in AES_256_CGM
+    
+    // finished handshake
     
     return 1;
 }

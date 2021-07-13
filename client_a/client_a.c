@@ -18,6 +18,10 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509_vfy.h>
+#include <openssl/rand.h>
+#include <openssl/rsa.h>
+#include <openssl/engine.h>
+
 
 #define MAX_BUFF 65535
 #define SA struct sockaddr
@@ -65,14 +69,14 @@ int ClientHandshake(int sockfd)
     }
     printf("hello from server!\n");
     bzero(buff, sizeof(buff));
-    msg_size = read(sockfd, buff, sizeof(buff));
+    msg_size = read(sockfd, buff, MAX_BUFF);
     if (msg_size>0)
     {
         tcp_msg = malloc(msg_size);
         for (int i=0;i<msg_size;i++)
             tcp_msg[i]=buff[i];
     }    
-    printf("Server Signature received (%d): \n%s \n",msg_size, tcp_msg );
+    printf("Server Signature received (%d): \n",msg_size);
     // open certificate
     FILE* cert_file = fopen("MessageApp_cert.pem", "r");
     if(cert_file==NULL){printf("Certificate File Open Error\n"); return 0;}
@@ -102,7 +106,48 @@ int ClientHandshake(int sockfd)
         printf("Server Authentication FAILED (%d)\n", ret_val);
         return 0;}
     EVP_MD_CTX_free(md_ctx);
-    X509_free(cert);
+    
+    RAND_poll();
+    unsigned char iv[] = "AABBCCDDEEFFGGHHAABBCCDDEEFFGGHH";
+    //RAND_bytes(iv, 32); // generate session IV
+    printf("IV: %s\n", iv);
+    // encrypt using server rsa pub key
+    EVP_PKEY* pubkey = X509_get_pubkey(cert);
+    X509_free(cert); // certificae is not used anymore
+    
+    int encrypted_key_len = EVP_PKEY_size(pubkey);
+    unsigned char *out;
+    size_t outlen, ivlen=32;
+    
+    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(pubkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_PKEY_encrypt_init(ctx_p);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_encrypt_init\n"); return 0;}
+    
+    ret_val = EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
+
+    // Determine buffer size for IV encrypted length
+    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, iv, ivlen) <= 0){printf("Error: EVP_PKEY_encrypt\n"); return 0;}
+            
+    out = OPENSSL_malloc(outlen);
+    if (out==NULL){printf("Malloc failed for encrypted IV value\n"); return 0;}
+
+    // encrypt IV using server pubkey
+    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, iv, ivlen);
+    if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
+    
+    printf("Sending IV encrypted with server rsa pubkey (%ld)\n", outlen);
+    sleep(1);
+    write(sockfd, out, outlen);
+    free(out);
+
+    // session key = sha 256 (IV)
+    // encrypt "finish" in AES_256_CGM
+    
+    // finished handshake
+    
     return 1;
 }    
     

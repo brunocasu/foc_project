@@ -1,0 +1,523 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="210mm"
+   height="297mm"
+   viewBox="0 0 210 297"
+   version="1.1"
+   id="svg5"
+   inkscape:version="1.1 (1:1.1+202105261517+ce6663b3b7)"
+   sodipodi:docname="drawing.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:document-units="mm"
+     showgrid="false"
+     inkscape:snap-text-baseline="true"
+     inkscape:zoom="0.1767767"
+     inkscape:cx="124.45079"
+     inkscape:cy="480.83261"
+     inkscape:window-width="1440"
+     inkscape:window-height="835"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs2">
+    <rect
+       x="-287.32669"
+       y="522.76535"
+       width="215.42267"
+       height="113.67432"
+       id="rect31714" />
+    <marker
+       style="overflow:visible;"
+       id="Arrow2Mend"
+       refX="0.0"
+       refY="0.0"
+       orient="auto"
+       inkscape:stockid="Arrow2Mend"
+       inkscape:isstock="true">
+      <path
+         transform="scale(0.6) rotate(180) translate(0,0)"
+         d="M 8.7185878,4.0337352 L -2.2072895,0.016013256 L 8.7185884,-4.0017078 C 6.9730900,-1.6296469 6.9831476,1.6157441 8.7185878,4.0337352 z "
+         style="fill-rule:evenodd;fill:context-stroke;stroke-width:0.62500000;stroke-linejoin:round;"
+         id="path20112" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Arrow2Mend-7"
+       refX="0"
+       refY="0"
+       orient="auto"
+       inkscape:stockid="Arrow2Mend"
+       inkscape:isstock="true">
+      <path
+         transform="scale(-0.6)"
+         d="M 8.7185878,4.0337352 -2.2072895,0.01601326 8.7185884,-4.0017078 c -1.7454984,2.3720609 -1.7354408,5.6174519 -6e-7,8.035443 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke-width:0.625;stroke-linejoin:round"
+         id="path20112-9" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Arrow2Mend-77"
+       refX="0"
+       refY="0"
+       orient="auto"
+       inkscape:stockid="Arrow2Mend"
+       inkscape:isstock="true">
+      <path
+         transform="scale(-0.6)"
+         d="M 8.7185878,4.0337352 -2.2072895,0.01601326 8.7185884,-4.0017078 c -1.7454984,2.3720609 -1.7354408,5.6174519 -6e-7,8.035443 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke-width:0.625;stroke-linejoin:round"
+         id="path20112-92" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Arrow2Mend-7-1"
+       refX="0"
+       refY="0"
+       orient="auto"
+       inkscape:stockid="Arrow2Mend"
+       inkscape:isstock="true">
+      <path
+         transform="scale(-0.6)"
+         d="M 8.7185878,4.0337352 -2.2072895,0.01601326 8.7185884,-4.0017078 c -1.7454984,2.3720609 -1.7354408,5.6174519 -6e-7,8.035443 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke-width:0.625;stroke-linejoin:round"
+         id="path20112-9-1" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Arrow2Mend-7-1-6"
+       refX="0"
+       refY="0"
+       orient="auto"
+       inkscape:stockid="Arrow2Mend"
+       inkscape:isstock="true">
+      <path
+         transform="scale(-0.6)"
+         d="M 8.7185878,4.0337352 -2.2072895,0.01601326 8.7185884,-4.0017078 c -1.7454984,2.3720609 -1.7354408,5.6174519 -6e-7,8.035443 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke-width:0.625;stroke-linejoin:round"
+         id="path20112-9-1-3" />
+    </marker>
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <text
+       xml:space="preserve"
+       transform="scale(0.26458333)"
+       id="text31712"
+       style="fill:black;fill-opacity:1;line-height:1.25;stroke:none;font-family:sans-serif;font-style:normal;font-weight:normal;font-size:40px;white-space:pre;shape-inside:url(#rect31714)" />
+    <g
+       id="g1302"
+       inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/New Folder/handshake.png"
+       inkscape:export-xdpi="300"
+       inkscape:export-ydpi="300">
+      <rect
+         style="fill:#ffffff;fill-opacity:1;stroke:none;stroke-width:0.759809"
+         id="rect942"
+         width="487.1424"
+         height="313.69836"
+         x="-169.6606"
+         y="4.7946038" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-15.827394"
+         y="15.789539"
+         id="text3069"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan3067"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:10.5833px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:0.264583"
+           x="-15.827394"
+           y="15.789539">CLIENT (ALICE)</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="160.78798"
+         y="17.131279"
+         id="text3069-2"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan3067-0"
+           style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:10.5833px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;stroke-width:0.264583"
+           x="160.78798"
+           y="17.131279">SERVER</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-16.965076"
+         y="43.137314"
+         id="text6600"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan6598"
+           style="stroke-width:0.264583"
+           x="-16.965076"
+           y="43.137314">server_cert.pem</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-8.1809769"
+         y="29.418447"
+         id="text6600-6"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan6598-3"
+           style="stroke-width:0.264583"
+           x="-8.1809769"
+           y="29.418447">CA_cert.pem</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="149.10403"
+         y="29.65254"
+         id="text6600-6-7"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan6598-3-6"
+           style="stroke-width:0.264583"
+           x="149.10403"
+           y="29.65254">CA_cert.pem</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="133.62073"
+         y="43.581387"
+         id="text6600-6-7-4"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan6598-3-6-7"
+           style="stroke-width:0.264583"
+           x="133.62073"
+           y="43.581387">server_prvkey.pem</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-5.9320192"
+         y="57.734596"
+         id="text6600-6-2"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan6598-3-9"
+           style="stroke-width:0.264583"
+           x="-5.9320192"
+           y="57.734596">prvkey.pem</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="136.33531"
+         y="57.319725"
+         id="text6600-6-2-0"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan6598-3-9-2"
+           style="stroke-width:0.264583"
+           x="136.33531"
+           y="57.319725">alice_pubkey.pem</tspan></text>
+      <path
+         style="fill:none;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Arrow2Mend)"
+         d="M 12.157271,89.94808 174.23065,113.00237"
+         id="path19188"
+         sodipodi:nodetypes="cc"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300" />
+      <path
+         style="fill:none;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Arrow2Mend-7)"
+         d="M 174.23065,115.64822 12.157277,138.70251"
+         id="path19188-9"
+         sodipodi:nodetypes="cc"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300" />
+      <path
+         style="fill:none;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Arrow2Mend-77)"
+         d="M 12.157277,170.98188 174.23065,194.03617"
+         id="path19188-4"
+         sodipodi:nodetypes="cc"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300" />
+      <path
+         style="fill:none;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Arrow2Mend-7-1)"
+         d="M 174.23065,208.85293 12.157283,231.90722"
+         id="path19188-9-2"
+         sodipodi:nodetypes="cc"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300" />
+      <path
+         style="fill:none;stroke:#000000;stroke-width:0.8;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#Arrow2Mend-7-1-6)"
+         d="M 12.157283,247.25315 174.23065,270.30744"
+         id="path19188-9-2-5"
+         sodipodi:nodetypes="cc"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-34.457161"
+         y="80.758781"
+         id="text23314"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312"
+           style="stroke-width:0.264583"
+           x="-34.457161"
+           y="80.758781">start handshake</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="85.61042"
+         y="97.705452"
+         id="text23314-2"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-8"
+           style="stroke-width:0.264583"
+           x="85.61042"
+           y="97.705452">&quot;hello&quot;</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="56.9151"
+         y="211.79611"
+         id="text23314-2-8"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-8-1"
+           style="stroke-width:0.264583"
+           x="56.9151"
+           y="211.79611">E(&quot;finish&quot;)<tspan
+   style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:6.35px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal"
+   id="tspan62903">session_key</tspan></tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="59.031769"
+         y="251.01434"
+         id="text23314-2-8-6"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-8-1-5"
+           style="stroke-width:0.264583"
+           x="59.031769"
+           y="251.01434">E(&quot;finish&quot;)<tspan
+   style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:6.35px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal"
+   id="tspan62903-7">session_key</tspan></tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="56.120148"
+         y="142.67006"
+         id="text23314-2-0"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-8-2"
+           style="stroke-width:0.264583"
+           x="56.120148"
+           y="142.67006">&quot;hello&quot; + signature</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="71.047997"
+         y="174.92752"
+         id="text23314-2-0-4"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-8-2-9"
+           style="stroke-width:0.264583"
+           x="71.047997"
+           y="174.92752">E(IV)<tspan
+   style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:6.35px;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal"
+   id="tspan36593">server_pubkey</tspan></tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="183.35408"
+         y="116.57434"
+         id="text23314-7"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-2"
+           style="stroke-width:0.264583"
+           x="183.35408"
+           y="116.57434">Sign with rsa prvkey</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="184.8418"
+         y="185.52556"
+         id="text23314-7-2"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-2-6"
+           style="stroke-width:0.264583"
+           x="184.8418"
+           y="185.52556">Decrypt IV with rsa prvkey</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="185.32863"
+         y="201.72485"
+         id="text23314-7-2-0"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-2-6-5"
+           style="stroke-width:0.264583"
+           x="185.32863"
+           y="201.72485">session_key = SHA256(IV)</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="184.8418"
+         y="217.15778"
+         id="text23314-7-2-0-2"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-2-6-5-2"
+           style="stroke-width:0.264583"
+           x="184.8418"
+           y="217.15778">Encrypt AES_256_GCM</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-117.5277"
+         y="231.73691"
+         id="text23314-7-2-0-6"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-2-6-5-6"
+           style="stroke-width:0.264583"
+           x="-117.5277"
+           y="231.73691">session_key = SHA256(IV)</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-118.01454"
+         y="247.16983"
+         id="text23314-7-2-0-2-2"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-2-6-5-2-9"
+           style="stroke-width:0.264583"
+           x="-118.01454"
+           y="247.16983">Encrypt AES_256_GCM</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;-inkscape-font-specification:'sans-serif, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-138.22276"
+         y="166.98303"
+         id="text23314-7-2-5"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan44850"
+           x="-138.22276"
+           y="166.98303">		             Generate random IV</tspan><tspan
+           sodipodi:role="line"
+           x="-138.22276"
+           y="180.21216"
+           id="tspan52184">Encrypt IV with server pubkey</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-165.39742"
+         y="141.00185"
+         id="text23314-7-3"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           style="stroke-width:0.264583"
+           x="-165.39742"
+           y="141.00185"
+           id="tspan33556">Authenticate server with certificate</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="184.81384"
+         y="274.01166"
+         id="text23314-9"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-6"
+           style="stroke-width:0.264583"
+           x="184.81384"
+           y="274.01166">finish handshake</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-weight:normal;font-size:10.5833px;line-height:1.25;font-family:sans-serif;fill:#000000;fill-opacity:1;stroke:none;stroke-width:0.264583"
+         x="-25.347095"
+         y="315.35455"
+         id="text23314-9-8"
+         inkscape:export-filename="/home/brunocasu/Documents/FOC/Project/foc_project/handshake.png"
+         inkscape:export-xdpi="300"
+         inkscape:export-ydpi="300"><tspan
+           sodipodi:role="line"
+           id="tspan23312-6-5"
+           style="stroke-width:0.264583"
+           x="-25.347095"
+           y="315.35455">User and Server must compute the same session key</tspan></text>
+    </g>
+  </g>
+</svg>

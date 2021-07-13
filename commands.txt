@@ -12,14 +12,6 @@ openssl rsa -in privkey.pem -passin pass:alicepwd -pubout -out alicekey.pem
 
 2. generate certificate and pub key for the server
 
-openssl req -new -newkey rsa:3072 -keyout server_privkey.pem -out certreq.pem
-root
 
 
-openssl genrsa -out MessageApp_key.pem 3072
 
-openssl req -x509 -new -nodes -key MessageApp_key.pem -sha256 -days 365 -out MessageApp_cert.pem
-
--openssl req -x509 -nodes -days 365 -newkey rsa:1024 -keyout mycert.pem -out mycert.pem
--openssl x509 -in TrustedCA_root_cert.pem -signkey MessageApp_key.pem -x509toreq -out MessageApp_cert.pem
--openssl verify -verbose -CAFile TrustedCA_root_cert.pem MessageApp_cert.pem

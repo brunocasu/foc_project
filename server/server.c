@@ -126,6 +126,7 @@ int MessageApp_handshake(int channel)
     int ret_val;
     int msg_size;
     
+    /** RECEIVE Client hello */
     msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
     if ((msg_size>0)&&(msg_size<MAX_BUFF))
     {
@@ -138,7 +139,7 @@ int MessageApp_handshake(int channel)
     if(strcmp("hello",tcp_msg) != 0)
         return 0;
     
-    /** BEGIN COMPUTE AND SEND SIGNATURE  */
+    /** BEGIN COMPUTE AND SEND SIGNATURE USING RSA PRIVKEY  */
     FILE* privkey_file = fopen("MessageApp_key.pem", "r");
     if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
     EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
@@ -159,7 +160,7 @@ int MessageApp_handshake(int channel)
     unsigned int sgnt_size;
     ret_val = EVP_SignFinal(md_ctx, sgnt_buf, &sgnt_size, privkey);
     if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
-    printf("Server Signature size %d\n", sgnt_size);
+    printf("Server Signature size (%d)\n", sgnt_size);
     // delete the digest from memory:
     EVP_MD_CTX_free(md_ctx);
     EVP_PKEY_free(privkey);
@@ -169,32 +170,32 @@ int MessageApp_handshake(int channel)
     write(usr_data[channel].connfd, "hello", 5);
     sleep(1);
     write(usr_data[channel].connfd, sgnt_buf, sgnt_size);
-    printf("Server Signature sent (%d) in Channel (%d)\n", sgnt_size, channel);
+    printf("Server Signature sent (%d) in Channel (%d)\nWaiting for Client Username...\n", sgnt_size, channel);
     free(sgnt_buf);
     /** END COMPUTE AND SEND SIGNATURE  */
     
-    // receive encrypted IV from client
+    /** RECEIVE encrypted username from client */
     buff = malloc(MAX_BUFF);
     msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
-    printf("Encrypted IV received (%d)\n",msg_size);
-    if ((msg_size>0)&&(msg_size<MAX_BUFF))
+    printf("Encrypted Username received (%d)\n",msg_size);
+    if ((msg_size>0)&&(msg_size<MAX_BUFF)) // maximum size for username is 16
     {
         tcp_msg = malloc(msg_size);
         for (int i=0;i<msg_size;i++)
             tcp_msg[i]=buff[i];
     }
-    else {printf("Failed to receive encrypted IV \n"); return 0;}
+    else {printf("Failed to receive Username\n"); return 0;}
     free(buff);
     
-    /** BEGIN DECRYPT USERNAME  */
-    // tcp_msg <- IV encrypted by pubkey
+    /** BEGIN DECRYPT username MESSAGE USING RSA PRIVKEY */
+    // tcp_msg <- username encrypted by pubkey
     // decrypt IV using privkey
     privkey_file = fopen("MessageApp_key.pem", "r");
     if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
     privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
     fclose(privkey_file);
     if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
-
+    
     unsigned char *decrypted_msg;
     size_t outlen;
     // Decrypt Received Message using privkey
@@ -211,13 +212,61 @@ int MessageApp_handshake(int channel)
     ret_val = EVP_PKEY_decrypt(ctx_p, decrypted_msg, &outlen, tcp_msg, msg_size);
     if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
     
-    printf("DECRYPTED username: %s\n", decrypted_msg);
-    /** END DECRYPT USERNAME  */
+    printf("DECRYPTED username (%ld): %s\n",outlen, decrypted_msg);
+    /** END DECRYPT username MESSAGE USING RSA PRIVKEY  */
+    
+    /** RECEIVE Client Signature */
+    buff = malloc(MAX_BUFF);
+    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
+    printf("Encrypted Client Signature received (%d)\n",msg_size);
+    if ((msg_size>0)&&(msg_size<MAX_BUFF)) 
+    {
+        tcp_msg = malloc(msg_size);
+        for (int i=0;i<msg_size;i++)
+            tcp_msg[i]=buff[i];
+    }
+    else {printf("Failed to receive Client Signature \n"); return 0;}
+    free(buff);
+    
+    /** BEGIN VERIFY CLIENT AUTENTICITY USING REGISTERED PUBKEY */
+    char *pubkey_extension = "key.pem";
+    char *filename = malloc(outlen+7);
+    for (int i=0;i<outlen;i++)
+        filename[i] = decrypted_msg[i];
+    for (int n=0;n<7;n++)
+        filename[n+outlen] = pubkey_extension[n];
+    
+    printf("Trying to open: <%s> \n", filename);
+    FILE* clientpubkey_file = fopen(filename, "r");
+    if(clientpubkey_file==NULL){printf("USERNAME NOT REGISTERED\n"); write(usr_data[channel].connfd, "USERNAME NOT REGISTERED", 22); return 0;}
+    EVP_PKEY* clientpubkey = PEM_read_PUBKEY(clientpubkey_file, NULL, NULL, NULL);
+    fclose(clientpubkey_file);
+    if(clientpubkey==NULL){printf("Error: PEM_read_PUBKEY returned NULL\n"); return 0;}
+    
+    // create the signature context:
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_VerifyInit(md_ctx, md);
+    if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyUpdate(md_ctx, decrypted_msg, outlen);  
+    if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyFinal(md_ctx, tcp_msg, msg_size, clientpubkey);
+    if(ret_val==1)
+        printf("Client Authenticated! Username: <%s>\n", decrypted_msg);
+    else{printf("Client Authentication FAILED (%d)\n", ret_val); return 0;}
+        
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(clientpubkey);
+    free(tcp_msg);
+    
+    /** END VERIFY CLIENT AUTENTICITY USING REGISTERED PUBKEY */
     
     
-    
- /* Decrypted data is outlen bytes written to buffer out */
-    
+    RAND_poll();
+    unsigned char iv[] = "AABBCCDDEEFFGGHHAABBCCDDEEFFGGHH";
+    //RAND_bytes(iv, 32); // generate session IV
+    printf("IV: %s\n", iv);
     // seesion key = sha 256 (IV)
     // encrypt "finish" in AES_256_CGM
     
@@ -259,7 +308,7 @@ void* MessageApp_channel_0(void *vargp)
                 for (int i=0;i<msg_size;i++)
                     usr_data[channel].username = buff;
                 usrname_rec=1;
-                printf("USERNAME From client: %s\n", usr_data[channel].username);
+                printf("From client: %s\n", usr_data[channel].username);
             }
             else
                 printf("From client: %s\n", buff);        

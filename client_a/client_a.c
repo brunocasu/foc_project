@@ -122,8 +122,7 @@ int ClientHandshake(int sockfd)
     Username = malloc(16);
     printf("Enter your Registered User Name: ");
     scanf("%16s", Username);
-   
-    printf("User Name <%s> (%ld) \n",Username, strlen(Username));
+    
     EVP_PKEY* pubkey = X509_get_pubkey(cert); // Retrieve SERVER PUBKEY from the certificate
     X509_free(cert); // certificate is not used anymore
     
@@ -178,7 +177,6 @@ int ClientHandshake(int sockfd)
     
     // delete the digest from memory:
     EVP_MD_CTX_free(md_ctx);
-    EVP_PKEY_free(privkey);
     
     printf("Send username encrypted with server rsa pubkey (%ld)\n", outlen);
     write(sockfd, out, outlen);
@@ -187,6 +185,47 @@ int ClientHandshake(int sockfd)
     write(sockfd, sgnt_buf, sgnt_size);
     free(sgnt_buf);
     /** END COMPUTE CLIENT SIGNATURE USING RSA PRIVKEY  */ 
+    
+    /** RECEIVE encrypted IV from server */
+    buff = malloc(MAX_BUFF);
+    msg_size = read(sockfd, buff, MAX_BUFF);
+    printf("Encrypted IV received (%d)\n",msg_size);
+    if ((msg_size>0)&&(msg_size<MAX_BUFF)) // maximum size for username is 16
+    {
+        tcp_msg = malloc(msg_size);
+        for (int i=0;i<msg_size;i++)
+            tcp_msg[i]=buff[i];
+    }
+    else {printf("Failed to receive IV\n"); return 0;}
+    free(buff);
+    
+    /** BEGIN DECRYPT IV USING RSA PRIVKEY */
+    // tcp_msg <- username encrypted by pubkey
+    // decrypt IV using privkey
+    
+    unsigned char *iv;
+    // Decrypt Received Message using privkey
+    ctx_p = EVP_PKEY_CTX_new(privkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
+    /* Determine buffer length */
+    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, tcp_msg, msg_size) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
+    
+    iv = OPENSSL_malloc(outlen);
+    if (!iv){printf("Malloc Failed for IV\n"); return 0;}
+        
+    ret_val = EVP_PKEY_decrypt(ctx_p, iv, &outlen, tcp_msg, msg_size);
+    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
+    
+    EVP_PKEY_free(privkey);
+    EVP_PKEY_CTX_free(ctx_p);
+    printf("DECRYPTED IV (%ld): %s\n",outlen, iv);
+    
+    
+    /** END DECRYPT IV USING RSA PRIVKEY  */
+    
+    
     
     
     // session key = sha 256 (IV)

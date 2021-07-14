@@ -189,7 +189,7 @@ int MessageApp_handshake(int channel)
     
     /** BEGIN DECRYPT username MESSAGE USING RSA PRIVKEY */
     // tcp_msg <- username encrypted by pubkey
-    // decrypt IV using privkey
+    // decrypt using privkey
     privkey_file = fopen("MessageApp_key.pem", "r");
     if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
     privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
@@ -212,6 +212,9 @@ int MessageApp_handshake(int channel)
     ret_val = EVP_PKEY_decrypt(ctx_p, decrypted_msg, &outlen, tcp_msg, msg_size);
     if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
     
+    EVP_PKEY_free(privkey);
+    EVP_PKEY_CTX_free(ctx_p);
+    free(tcp_msg);
     printf("DECRYPTED username (%ld): %s\n",outlen, decrypted_msg);
     /** END DECRYPT username MESSAGE USING RSA PRIVKEY  */
     
@@ -257,17 +260,50 @@ int MessageApp_handshake(int channel)
     else{printf("Client Authentication FAILED (%d)\n", ret_val); return 0;}
         
     EVP_MD_CTX_free(md_ctx);
-    EVP_PKEY_free(clientpubkey);
+    // EVP_PKEY_free(clientpubkey);
     free(tcp_msg);
+    usr_data[channel].username = malloc(outlen);
+    for (int h=0;h<outlen;h++)
+        usr_data[channel].username[h] = decrypted_msg[h];
     
+    free(decrypted_msg);
     /** END VERIFY CLIENT AUTENTICITY USING REGISTERED PUBKEY */
     
-    
+    /** BEGIN GENERATE FRESH IV - ENCRYPT WITH USER PUBKEY */
     RAND_poll();
-    unsigned char iv[] = "AABBCCDDEEFFGGHHAABBCCDDEEFFGGHH";
-    //RAND_bytes(iv, 32); // generate session IV
+    unsigned char iv[32];// = "AABBCCDDEEFFGGHHAABBCCDDEEFFGGHH";
+    RAND_bytes(iv, 32); // generate session IV
     printf("IV: %s\n", iv);
-    // seesion key = sha 256 (IV)
+    
+    unsigned char* out;
+    
+    ctx_p = EVP_PKEY_CTX_new(clientpubkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_PKEY_encrypt_init(ctx_p);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_encrypt_init\n"); return 0;}
+    
+    ret_val = EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
+
+    // Determine buffer size for encrypted length
+    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, iv, 32) <= 0){printf("Error: EVP_PKEY_encrypt\n"); return 0;}
+            
+    out = OPENSSL_malloc(outlen);
+    if (out==NULL){printf("Malloc failed for username encryption\n"); return 0;}
+
+    // encrypt using client pubkey
+    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, iv, 32);
+    if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
+    
+    // free(out);
+    EVP_PKEY_CTX_free(ctx_p);
+    EVP_PKEY_free(clientpubkey);
+    
+    printf("Sending IV Encrypted with Client pubkey (%ld)\n", outlen);
+    write(usr_data[channel].connfd, out, outlen);
+    /** BEGIN GENERATE FRESH IV - ENCRYPT WITH USER PUBKEY */
+
     // encrypt "finish" in AES_256_CGM
     
     // finished handshake

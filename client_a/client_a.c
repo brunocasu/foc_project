@@ -52,7 +52,98 @@ int OpenConnection(const char *hostname, int port)
     return sd;
 }
 
-int ClientHandshake(int sockfd)
+// return size of encrypted_msg
+int EncryptAES_256_GCM( unsigned char* encrypted_msg,
+                        unsigned char* clear_msg, int msg_len, 
+                        unsigned char* aad, int aad_len,
+                        unsigned char* iv,
+                        unsigned char* key,
+                        unsigned char* tag)
+{
+    int len=0;
+    int ciphertext_len=0;
+    int ret_val;
+
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (ctx==NULL){printf("Error encrypt EVP_CIPHER_CTX_new returned NULL"); return -1;}
+
+    ret_val = EVP_EncryptInit(ctx, EVP_aes_256_gcm(), key, iv);
+    if (ret_val<=0){printf("Error EVP_EncryptInit"); return -1;}
+
+    ret_val = EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len);
+    if (ret_val<=0){printf("Error EVP_EncryptUpdate AAD"); return -1;}
+
+    ret_val = EVP_EncryptUpdate(ctx, encrypted_msg, &len, clear_msg, msg_len);
+    if (ret_val<=0){printf("Error EVP_EncryptUpdate plaintext"); return -1;}
+
+    ciphertext_len = len;
+	//Finalize Encryption
+    if(1 != EVP_EncryptFinal(ctx, encrypted_msg + len, &len))
+    if (ret_val<=0){printf("Error EVP_EncryptFinal"); return -1;}
+
+    ciphertext_len += len;
+    
+    /* Get the tag */
+    if(1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag))
+    {printf("Error EVP_CIPHER_CTX_ctrl GET TAG"); return -1;}
+  
+    EVP_CIPHER_CTX_free(ctx);
+
+    return ciphertext_len;
+} 
+
+
+// return size of decrypted_msg
+int DecryptAES_256_GCM( unsigned char* clear_msg,
+                        unsigned char* encrypted_msg, int encrypted_len, 
+                        unsigned char* aad, int aad_len,
+                        unsigned char* iv,
+                        unsigned char* key,
+                        unsigned char* tag)
+{
+    int len;
+    int plaintext_len;
+    int ret;
+    int ret_val;
+    
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (ctx==NULL){printf("Error encrypt EVP_CIPHER_CTX_new returned NULL"); return -1;}
+    
+    ret_val = EVP_DecryptInit(ctx, EVP_aes_256_gcm(), key, iv);
+    if (ret_val<=0){printf("Error EVP_DecryptInit"); return -1;}
+    
+	//Provide any AAD data.
+    ret_val = EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len);
+    if (ret_val<=0){printf("Error EVP_DecryptUpdate"); return -1;}
+    
+	//Provide the message to be decrypted, and obtain the plaintext output.
+    ret_val = EVP_DecryptUpdate(ctx, clear_msg, &len, encrypted_msg, encrypted_len);
+    if (ret_val<=0){printf("Error EVP_DecryptUpdate"); return -1;}
+    
+    plaintext_len = len;
+    /* Set expected tag value. Works in OpenSSL 1.0.1d and later */
+    ret_val = EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, tag);
+    if (ret_val<=0){printf("Error EVP_DecryptUpdate"); return -1;}
+    /*
+     * Finalise the decryption. A positive return value indicates success,
+     * anything else is a failure - the plaintext is not trustworthy.
+     */
+    ret = EVP_DecryptFinal(ctx, clear_msg + len, &len);
+
+    /* Clean up */
+    EVP_CIPHER_CTX_cleanup(ctx);
+
+    if(ret > 0) {
+        /* Success */
+        plaintext_len += len;
+        return plaintext_len;
+    } else {
+        /* Verify failed */
+        return -1;
+    } 
+}
+
+int ClientHandshake(int sockfd, unsigned char* session_key, unsigned int* key_len)
 {
     char *buff = malloc(MAX_BUFF);
     int msg_size;
@@ -60,9 +151,11 @@ int ClientHandshake(int sockfd)
     int ret_val;
     
     // Begin Handshake
+    /** SEND "hello" */
     write(sockfd, "hello", 5);
     free(buff);
     
+    /** RECEIVE "hello"*/
     buff = malloc(MAX_BUFF);
     msg_size = read(sockfd, buff, MAX_BUFF);
     if ((msg_size>0)&&(msg_size<MAX_BUFF))
@@ -75,6 +168,7 @@ int ClientHandshake(int sockfd)
     printf("hello from server!\n");
     free(buff);
     
+    /** RECEIVE server signature */
     buff = malloc(MAX_BUFF);
     msg_size = read(sockfd, buff, MAX_BUFF);
     if ((msg_size>0)&&(msg_size<MAX_BUFF))
@@ -104,7 +198,7 @@ int ClientHandshake(int sockfd)
     EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
     if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
     
-    ret_val = EVP_VerifyInit(md_ctx, md);
+    ret_val = EVP_VerifyInit(md_ctx, EVP_sha256());
     if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
     ret_val = EVP_VerifyUpdate(md_ctx, "hello", 5);  
     if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
@@ -115,8 +209,10 @@ int ClientHandshake(int sockfd)
         printf("Server Authentication FAILED (%d)\n", ret_val);
         return 0;}
     EVP_MD_CTX_free(md_ctx);
+    //EVP_MD_free(md);
     free(tcp_msg);
     /** END VERIFY SIGNATURE USING SERVER CERTIFICATE */
+    
     
     /** BEGIN ENCRYPT username USING SERVER RSA PUBKEY */
     Username = malloc(16);
@@ -167,7 +263,8 @@ int ClientHandshake(int sockfd)
     unsigned char* sgnt_buf = (unsigned char*)malloc(EVP_PKEY_size(privkey));
     if(sgnt_buf==NULL) {printf("Error: malloc returned NULL\n"); return 0;}
     
-    ret_val = EVP_SignInit(md_ctx, md);
+    md = EVP_sha256();
+    ret_val = EVP_SignInit(md_ctx, EVP_sha256());
     if(ret_val == 0){printf("Error: EVP_SignInit returned %d\n",ret_val); return 0;}
     ret_val = EVP_SignUpdate(md_ctx, Username, strlen(Username));
     if(ret_val == 0){printf("Error: EVP_SignUpdate returned %d\n",ret_val); return 0;}
@@ -177,15 +274,17 @@ int ClientHandshake(int sockfd)
     
     // delete the digest from memory:
     EVP_MD_CTX_free(md_ctx);
+    //EVP_MD_free(md);
+    /** END COMPUTE CLIENT SIGNATURE USING RSA PRIVKEY  */ 
     
+    /** SEND E(username)server_pubkey + client signature*/
     printf("Send username encrypted with server rsa pubkey (%ld)\n", outlen);
     write(sockfd, out, outlen);
     sleep(1);
     printf("Send Client Signature (%d)\n", sgnt_size);
     write(sockfd, sgnt_buf, sgnt_size);
     free(sgnt_buf);
-    /** END COMPUTE CLIENT SIGNATURE USING RSA PRIVKEY  */ 
-    
+    free(out);
     /** RECEIVE encrypted IV from server */
     buff = malloc(MAX_BUFF);
     msg_size = read(sockfd, buff, MAX_BUFF);
@@ -220,17 +319,103 @@ int ClientHandshake(int sockfd)
     
     EVP_PKEY_free(privkey);
     EVP_PKEY_CTX_free(ctx_p);
+    free(tcp_msg);
     printf("DECRYPTED IV (%ld): %s\n",outlen, iv);
-    
-    
     /** END DECRYPT IV USING RSA PRIVKEY  */
     
     
+    /** BEGIN GENERATE FRESH SESSION KEY */
+    size_t iv_len = outlen;
+    unsigned char* digest;
+    unsigned int digestlen;
+    
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    digest = (unsigned char* ) malloc(EVP_MD_size(EVP_sha256()));
+    if(digest==NULL){printf("Error: malloc failed for digest\n"); return 0;}
+    
+
+    ret_val = EVP_DigestInit(md_ctx, EVP_sha256());
+    if(ret_val<=0){printf("Error: DigestInit returned NULL\n"); return 0;}
+    ret_val = EVP_DigestUpdate(md_ctx, iv, iv_len);
+    if(ret_val<=0){printf("Error: DigestUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_DigestFinal(md_ctx, digest, &digestlen);
+    if(ret_val<=0){printf("Error: DigestFinal returned NULL\n"); return 0;}
+    
+    EVP_MD_CTX_free(md_ctx);
+    //EVP_MD_free(md);
+    printf("Digest is (%d): ", digestlen);
+    // session_key = malloc(digestlen);
+    for (int k=0;k<digestlen;k++){
+        session_key[k] = digest[k];
+        printf("%02x ", (unsigned char)session_key[k]);
+    }
+    *key_len = digestlen;
+    free(digest);
+    /** END GENERATE FRESH SESSION KEY */
     
     
-    // session key = sha 256 (IV)
-    // encrypt "finish" in AES_256_CGM
+    /** BEGIN ENCRYPT "finish" using SESSION KEY and AES 256 GCM */
+    RAND_poll();
+    unsigned char *aad="AABBCCDDSSKKGGOO";
+    //RAND_bytes(aad, 16);
+    unsigned char tag[16];
+    printf("\nBEGIN Encryption using Shared KEY\n" );
+    outlen = EncryptAES_256_GCM(out, "finish", 6, aad, 16, iv, session_key, tag);    
+    if (outlen<=0){printf("Error: EncryptAES_256_GCM\n"); return 0;}
     
+    unsigned char* enc_finish = malloc(outlen+16+16);
+    
+    for (int v=0;v<16;v++)
+        enc_finish[v] = aad[v];
+    for (int v=0;v<16;v++)
+        enc_finish[v+16] = tag[v];
+    for (int v=0;v<outlen;v++)
+        enc_finish[v+32] = out[v];    
+    /** END ENCRYPT "finish" using SESSION KEY and AES 256 GCM */
+
+    printf("AAD is: ");
+    for (int k=0;k<16;k++){
+        printf("%02x ", (unsigned char)enc_finish[k]);
+    }    
+    printf("\nTag is: ");
+    for (int k=16;k<32;k++){
+        printf("%02x ", (unsigned char)enc_finish[k]);
+    }
+    printf("\nCyp is: " );
+    for (int k=32;k<outlen+32;k++){
+        printf("%02x ", (unsigned char)enc_finish[k]);
+    }
+    
+    /** SEND encrypted "finish" using SESSION KEY */
+    printf("\nSend finish encrypted shared Key (%ld) \n", outlen+16+16);
+    write(sockfd, enc_finish, outlen+16+16);
+    // free(enc_finish);
+
+    /** RECEIVE encrypted "finish" using SESSION KEY */
+    buff = malloc(MAX_BUFF);
+    msg_size = read(sockfd, buff, MAX_BUFF);
+    printf("Encrypted Finish received (%d)\n",msg_size);
+    unsigned char rec_aad[16];
+    unsigned char rec_tag[16];
+    if ((msg_size>32)&&(msg_size<MAX_BUFF)) // maximum size for username is 16
+    {
+        tcp_msg = malloc(msg_size);
+        for(int a=0;a<16;a++){rec_aad[a] = buff[a];}
+        for(int t=16;t<32;t++){rec_tag[t] = buff[t];}
+        for(int i=32;i<msg_size;i++){tcp_msg[i]=buff[i];}
+            
+    }
+    else {printf("Failed to receive Finish\n"); return 0;}
+    free(buff);
+    
+    /** BEGIN DECRYPT "finish" using SESSION KEY and AES 256 GCM */
+    unsigned char* clear_msg = malloc(MAX_BUFF);
+    int val = DecryptAES_256_GCM(clear_msg, tcp_msg, msg_size-32, rec_aad, 16, iv, session_key, rec_tag);
+    /** END DECRYPT "finish" using SESSION KEY and AES 256 GCM */
+    
+    printf("clear_msg (%d): %s\n",val, clear_msg);
     // finished handshake
     
     return 1;
@@ -243,7 +428,7 @@ int func(int sockfd)
     
     for (;;) {
         bzero(buff, sizeof(buff));
-        printf("Enter the string : ");
+        printf("\nEnter the string : ");
         n = 0;
         while ((buff[n++] = getchar()) != '\n');
             
@@ -286,7 +471,10 @@ int main(int count, char *args[])
     //free(buff);
     int sockfd = OpenConnection(hostname, portnum);
 
-    ClientHandshake(sockfd);
+    unsigned char session_key[32];
+    unsigned int key_len = 0;
+    ClientHandshake(sockfd, session_key, &key_len);
+    printf("\nkeylen: %d\n", key_len);
     // function for chat
     func(sockfd);
   

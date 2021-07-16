@@ -654,11 +654,11 @@ void* MessageApp_channel_0(void *vargp)
             for (int i=0;i<client_msg_len-4;i++){data[i]=client_msg[i+4];} // Save received DATA
             
             /** process Command from client */
-            if ((strcmp("chat", cmd) == 0)&&(in_chat_flag == 0)&&(usr_data[friend_channel].pending == 0)){ // Request to chat with another user
+            if ((strncmp("chat", cmd, 4) == 0)&&(in_chat_flag == 0)&&(usr_data[friend_channel].pending == 0)){ // Request to chat with another user
                 if((client_msg_len-4)<16){
                     friend_channel = 0;
                     for(int n=0;n<MAX_CHANNELS;n++){ // search the friend username on the channels
-                        if (strcmp(data, usr_data[friend_channel].username) == 0){ // found matching username fomr database
+                        if (strncmp(data, usr_data[friend_channel].username, usr_data[friend_channel].username_len) == 0){ // found matching username fomr database
                             msg_to_send = malloc(4+usr_data[channel].username_len);
                             strcat(msg_to_send, "reqt");
                             strcat(msg_to_send, usr_data[channel].username); // Send "reqt" command follwed by the Username of the Request agent
@@ -675,19 +675,20 @@ void* MessageApp_channel_0(void *vargp)
                 }
                 else {channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, "erroUsername incorrect", 22);}
             }
-            else if ((strcmp("acpt", cmd) == 0)&&(usr_data[channel].pending == 1)){ // User accepted connexion from friend
+            else if ((strncmp("acpt", cmd, 4) == 0)&&(usr_data[channel].pending == 1)){ // User accepted connexion from friend
                 usr_data[channel].pending = 0;
                 in_chat_flag = 1;
                 if((client_msg_len-4)<16){
                     friend_channel = 0;
                     for(int n=0;n<MAX_CHANNELS;n++){ // search the friend username on the channels
-                        if (strcmp(data, usr_data[friend_channel].username) == 0){ // found matching username fomr database
+                        if (strncmp(data, usr_data[friend_channel].username, usr_data[friend_channel].username_len) == 0){ // found matching username fomr database
                             user_pubkey_len = get_user_pubkey_text(usr_data[friend_channel].username, usr_data[friend_channel].username_len, user_pubkey);                            
                             msg_to_send = malloc(4+user_pubkey_len);
                             strcat(msg_to_send, "pubk");
                             strcat(msg_to_send, user_pubkey); // This is pukey for the REQUEST agent
                             free(user_pubkey);
-                            channel_secure_send(friend_channel, usr_data[friend_channel].iv, usr_data[friend_channel].key, msg_to_send, 4+user_pubkey_len); // found 
+                            printf("SENDING PUB KEY TO %s", usr_data[friend_channel].username);
+                            //channel_secure_send(friend_channel, usr_data[friend_channel].iv, usr_data[friend_channel].key, msg_to_send, 4+user_pubkey_len); // found 
                             free(msg_to_send);
                             
                             user_pubkey_len = get_user_pubkey_text(usr_data[channel].username, usr_data[channel].username_len, user_pubkey);                            
@@ -695,7 +696,8 @@ void* MessageApp_channel_0(void *vargp)
                             strcat(msg_to_send, "pubk");
                             strcat(msg_to_send, user_pubkey); // This is pukey for the ACCEPT agent
                             free(user_pubkey);
-                            channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, msg_to_send, 4+user_pubkey_len); // found 
+                            printf("SENDING PUB KEY TO %s", usr_data[channel].username);
+                            //channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, msg_to_send, 4+user_pubkey_len); // found 
                             free(msg_to_send);
                             break;} 
                         else {
@@ -706,19 +708,20 @@ void* MessageApp_channel_0(void *vargp)
                 else {channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, "erroUsername incorrect", 22);}
                 // Send pubkeys                
             }
-            else if ((strcmp("refu", cmd) == 0)&&(usr_data[channel].pending == 1)){
+            else if ((strncmp("refu", cmd, 4) == 0)&&(usr_data[channel].pending == 1)){
                 usr_data[channel].pending = 0;                 
             }
-            else if ((strcmp("frwd", cmd) == 0)&&(in_chat_flag == 1)){
+            else if ((strncmp("frwd", cmd, 4) == 0)&&(in_chat_flag == 1)){
                              
             }
-            else if (strcmp("list", cmd) == 0){
+            else if (strncmp("list", cmd, 4) == 0){
                              
             }  
-            else if (strcmp("exit", cmd) == 0){
+            else if (strncmp("exit", cmd, 4) == 0){
                              
             }        
         }
+        else {sleep(1); close(usr_data[channel].connfd); }
     }
     // close(server_sockfd);
     for(;;);

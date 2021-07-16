@@ -9,9 +9,11 @@ gcc -o client  client_a.c -lssl -lcrypto -lpthread
 openssl genrsa -aes256 -passout pass:alicepwd -out privkey.pem 2048
 openssl rsa -in privkey.pem -passin pass:alicepwd -pubout -out alicekey.pem
 
+openssl genrsa -aes256 -passout pass:bobpwd -out privkey.pem 2048
+openssl rsa -in privkey.pem -passin pass:bobpwd -pubout -out bobkey.pem
 
 2. generate certificate and pub key for the server
-
+Use certificate tool
 
 
 

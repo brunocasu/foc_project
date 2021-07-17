@@ -27,9 +27,15 @@
 #define SA struct sockaddr
 
 char* Username;
-unsigned char* iv;
+unsigned char iv[12];
 unsigned char session_key[32];
 int sockfd;
+int caller=0; // caller is 1 if you is the one who started the chat
+int chat_with_friend_flag = 0; // flag is set to one to add the chat session key in the encryption
+unsigned char* friend_pubkey_txt;
+char friend_iv[12];
+char friend_session_key[32];
+
     
 int OpenConnection(const char *hostname, int port)
 {
@@ -175,39 +181,49 @@ int server_secure_send(int sockfd, unsigned char* iv, unsigned char* session_key
 // retuns received text length
 int server_secure_receive(int sockfd, unsigned char* iv, unsigned char* key, unsigned char* clear_text)
 {
-    char* buff = malloc(MAX_BUFF);
-    char* tcp_msg;
+    char buff[MAX_BUFF];
+    char tcp_msg[MAX_BUFF];
     int msg_size;
     unsigned char rec_aad[16];
     unsigned char rec_tag[16];
+    fd_set read_set;
+    struct timeval timeout;
     
-    printf("WAITING Message in server Secure Channel...\n");
+    //printf("WAITING Message in Secure Channel\n");
+    timeout.tv_sec = 1800; // Time out after a minute
+    timeout.tv_usec = 0;
+
+    FD_ZERO(&read_set);
+    FD_SET(sockfd, &read_set);
+
+    int r=select(sockfd+1, &read_set, NULL, NULL, &timeout);
+
+    if( r<=0 ) {return 0;}
+    
     msg_size = read(sockfd, buff, MAX_BUFF);
 
     if ((msg_size>32)&&(msg_size<MAX_BUFF))
     {
-        tcp_msg = malloc(msg_size-32);
         for(int i=0;i<16;i++){rec_aad[i] = buff[i];}
         for(int i=0;i<16;i++){rec_tag[i] = buff[i+16];}
         for(int i=0;i<msg_size;i++){tcp_msg[i]=buff[i+32];}            
     }
     else { return 0;}
-    free(buff);
     
     unsigned char decrypt_buff[MAX_BUFF];
     int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-32, rec_aad, 16, iv, key, rec_tag);
-    if (clear_len<0){printf("AES DECRYPTION FAILED"); return 0;}
+    if (clear_len<0){printf("AES DECRYPTION FAILED\n"); return 0;}
 
-    clear_text = malloc(clear_len);
     for (int i=0;i<clear_len;i++)
         clear_text[i] = decrypt_buff[i];
+    
     return clear_len;
 }
 
 
 
 
-int ClientHandshake(int sockfd)
+int ClientHandshake()
 {
     char *buff = malloc(MAX_BUFF);
     int msg_size;
@@ -374,8 +390,8 @@ int ClientHandshake(int sockfd)
     /* Determine buffer length */
     if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, tcp_msg, msg_size) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
     
-    iv = malloc(outlen);
-    if (!iv){printf("Malloc Failed for IV\n"); return 0;}
+    // iv = malloc(outlen);
+    // if (!iv){printf("Malloc Failed for IV\n"); return 0;}
         
     ret_val = EVP_PKEY_decrypt(ctx_p, iv, &outlen, tcp_msg, msg_size);
     if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
@@ -488,51 +504,91 @@ void* sender_Task(void *vargp)
 {   
     char *sbuff;
     int len;
+    char *cmd_chat ="chat";
+    char *cmd_reqt ="reqt";
+    char *cmd_pubk ="pubk";
+    char *cmd_acpt ="acpt";
+    char *cmd_refu ="refu";
+    char *cmd_frwd = "frwd";
+    char *cmd_list = "list";
+    char *cmd_exit ="exit";
+    char ipt_cmd[4];
     
     for (;;) {
         sbuff = malloc(32);
-        printf("%s", iv);
             
         printf("\nSECURE[cmd][param]->"); // send command to server
-        scanf("%32s", sbuff);
-        server_secure_send(sockfd, iv, session_key, sbuff, strlen(sbuff));
-        free(sbuff);
+        scanf("%65535s", sbuff);
+        if (chat_with_friend_flag == 0)
+        {
+            for(int i=0;i<4;i++){ipt_cmd[i] = sbuff[i];}
+            if(strncmp(ipt_cmd, cmd_chat, 4)){caller=1;}
+            
+            server_secure_send(sockfd, iv, session_key, sbuff, strlen(sbuff));
+            free(sbuff);
+        }
+        else if (chat_with_friend_flag == 1)
+        {
+            //encrypted_len = friend_encrypt(encrypted_friend_msg, clear_msg, clear_msg_len);
+            
+            //server_secure_send(sockfd, iv, session_key, encrypted_friend_msg, encrypted_len);
+            //free(sbuff);
+        }
     }
 }
 
 void* receiver_Task(void *vargp)
 {   
-    char buff[MAX_BUFF];
     int n;
     int r;
     int msg_len;
-    char* tcp_msg;
+    char tcp_msg[MAX_BUFF];
+    char data[MAX_BUFF];
+    char rec_cmd[4];
+    unsigned char clear_text[MAX_BUFF];
+    
     for (;;) {
         
-        printf("\nclient waiting...");
-        fd_set read_set;
-        struct timeval timeout;
-
-        timeout.tv_sec = 1800; // Time out after 30 minutes
-        timeout.tv_usec = 0;
-
-        FD_ZERO(&read_set);
-        FD_SET(sockfd, &read_set);
-
-        r=select(sockfd+1, &read_set, NULL, NULL, &timeout);
-
-        if( r>0 ) {
-            // The socket is ready for reading - call read() on it.    
-            msg_len = read(sockfd, buff, MAX_BUFF);
-            tcp_msg = malloc(msg_len);
-            for (int i=0;i<msg_len;i++){tcp_msg[i] = buff[i];}
-            printf("\nFrom Server(%d) : %s\n",msg_len, buff);
-            if ((strncmp(buff, "exit", 4)) == 0) {
-                printf("Client Exit...\n");
-                break;
+        //printf("\nclient waiting...");
+        msg_len = server_secure_receive(sockfd, iv, session_key, clear_text);
+        if (msg_len > 4){
+            for (int i=0;i<4;i++){rec_cmd[i]=clear_text[i];} // Save received COMMAND
+            for (int i=0;i<msg_len-4;i++){data[i]=clear_text[i+4];} // Save received DATA
+            
+            if(strncmp(rec_cmd, "reqt", 4)==0){ //received a request
+                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s>\nACCEPT?->", data);
             }
-            free(tcp_msg);
+            else if (strncmp(rec_cmd, "pubk", 4)==0){
+                if (caller==1){
+                    printf("\nMessageApp - CHAT ACCEPTED!\nMessasgeApp[CHAT]->");
+                    friend_pubkey_txt = malloc(msg_len-4);
+                    for(int k=0;k<msg_len-4;k++){friend_pubkey_txt[k] = data[k];}
+                    // friend_begin_negotiation(); // saves the chat session key and iv
+                    // chat_with_friend_flag = 1;
+                }
+                else{                    
+                    // friend_wait_negotiation(); // saves the chat session key and iv
+                    // chat_with_friend_flag = 1;
+                    printf("\nMessageApp - CHAT ACCEPTED!\nMessasgeApp[CHAT]->");
+                }
+            }
+            else if (strncmp(rec_cmd, "frwd", 4)==0){
+                printf("\nMessageApp - CHAT: %s\n", data);
+                // friend_decrypt(clear_msg, data);
+                // printf(clear_msg);
+            }
+            else if (strncmp(rec_cmd, "refu", 4)==0){
+                printf("\nMessageApp - REFUSED BY: %s\nSECURE[cmd][param]->", data);
+            }
+            else if (strncmp(rec_cmd, "list", 4)==0){
+                printf("\nMessageApp - ON LINE USERS: %sSECURE[cmd][param]->\n", data);
+            }
+            else if (strncmp(rec_cmd, "refu", 4)==0){
+                printf("\nMessageApp - ERROR: %s\nSECURE[cmd][param]->", data);
+            }
         }
+        else if (msg_len>0){printf("Server msg too short");}
+        else {close(sockfd); exit(0);} //close connection
     }
 }
   
@@ -557,7 +613,8 @@ int main(int count, char *args[])
     }
     sockfd = OpenConnection(hostname, portnum);
 
-    if (ClientHandshake(sockfd) == 1){
+    if (ClientHandshake() == 1){ // From the handshake, Client gets the session_key and iv
+        
         printf("\nCONNECTED to MessageApp\n");
         // function for chat
         pthread_create(&rec_id, NULL, receiver_Task, NULL);

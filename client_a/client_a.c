@@ -150,15 +150,16 @@ int DecryptAES_256_GCM( unsigned char* clear_msg,
 int server_secure_send(int sockfd, unsigned char* iv, unsigned char* session_key, unsigned char* send_text, int text_len)
 {
     RAND_poll();
-    unsigned char* out=malloc(MAX_BUFF);
-    unsigned char *aad="AABBCCDDSSKKGGOO";
-    //RAND_bytes(aad, 16);
+    unsigned char out[MAX_BUFF];
+    unsigned char aad[16];
+    RAND_bytes(aad, 16);
     unsigned char tag[16];
-    printf("\nBEGIN Encryption using Shared KEY\n" );
+
     int outlen = EncryptAES_256_GCM(out, send_text, text_len, aad, 16, iv, session_key, tag);    
     if (outlen<=0){printf("Error: EncryptAES_256_GCM\n"); return 0;}
     
     unsigned char* enc_finish = malloc(outlen+16+16);
+    if (enc_finish==NULL){return 0;}
     
     for (int v=0;v<16;v++)
         enc_finish[v] = aad[v];
@@ -166,26 +167,9 @@ int server_secure_send(int sockfd, unsigned char* iv, unsigned char* session_key
         enc_finish[v+16] = tag[v];
     for (int v=0;v<outlen;v++)
         enc_finish[v+32] = out[v];
-
-    free(out);    
-    /** END ENCRYPT "finish" using SESSION KEY and AES 256 GCM */
-
-    printf("AAD is: ");
-    for (int k=0;k<16;k++){
-        printf("%02x ", (unsigned char)enc_finish[k]);
-    }    
-    printf("\nTag is: ");
-    for (int k=16;k<32;k++){
-        printf("%02x ", (unsigned char)enc_finish[k]);
-    }
-    printf("\nCyp is: " );
-    for (int k=32;k<outlen+32;k++){
-        printf("%02x ", (unsigned char)enc_finish[k]);
-    }
     
-    /** SEND encrypted "finish" using SESSION KEY */
-    printf("\nSend finish encrypted mag (%d) \n", outlen+16+16);
-    write(sockfd, enc_finish, outlen+16+16);
+    int ret_val = write(sockfd, enc_finish, outlen+16+16);
+    return ret_val;
 }
 
 // retuns received text length
@@ -504,39 +488,51 @@ void* sender_Task(void *vargp)
 {   
     char *sbuff;
     int len;
-    int n;
     
     for (;;) {
         sbuff = malloc(32);
-        printf("\nSESSION IV: ");
         printf("%s", iv);
             
-        printf("\nType[cmd][param]->");
-        n = 0;
-        len = scanf("%32s", sbuff);
-        
-        server_secure_send(sockfd, iv, session_key, sbuff, len);
+        printf("\nSECURE[cmd][param]->"); // send command to server
+        scanf("%32s", sbuff);
+        server_secure_send(sockfd, iv, session_key, sbuff, strlen(sbuff));
         free(sbuff);
     }
 }
 
 void* receiver_Task(void *vargp)
 {   
-    char *buff;
+    char buff[MAX_BUFF];
     int n;
-    
+    int r;
+    int msg_len;
+    char* tcp_msg;
     for (;;) {
-        buff = malloc(MAX_BUFF);
         
         printf("\nclient waiting...");
-        read(sockfd, buff, MAX_BUFF);
-        printf("\nFrom Server : %s\n", buff);
-        if ((strncmp(buff, "exit", 4)) == 0) {
-            printf("Client Exit...\n");
-            break;
+        fd_set read_set;
+        struct timeval timeout;
+
+        timeout.tv_sec = 1800; // Time out after 30 minutes
+        timeout.tv_usec = 0;
+
+        FD_ZERO(&read_set);
+        FD_SET(sockfd, &read_set);
+
+        r=select(sockfd+1, &read_set, NULL, NULL, &timeout);
+
+        if( r>0 ) {
+            // The socket is ready for reading - call read() on it.    
+            msg_len = read(sockfd, buff, MAX_BUFF);
+            tcp_msg = malloc(msg_len);
+            for (int i=0;i<msg_len;i++){tcp_msg[i] = buff[i];}
+            printf("\nFrom Server(%d) : %s\n",msg_len, buff);
+            if ((strncmp(buff, "exit", 4)) == 0) {
+                printf("Client Exit...\n");
+                break;
+            }
+            free(tcp_msg);
         }
-        free(buff);
-        
     }
 }
   

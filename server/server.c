@@ -30,8 +30,8 @@ struct client_id {
     char* username;
     int username_len;
     int connfd;
-    unsigned char* iv;
-    unsigned char* key;
+    unsigned char iv[12];
+    unsigned char key[32];
     int pending;
 };
 
@@ -44,15 +44,17 @@ int EncryptAES_256_GCM( unsigned char* encrypted_msg,
                         unsigned char* iv,
                         unsigned char* key,
                         unsigned char* tag);
+
 int DecryptAES_256_GCM( unsigned char* clear_msg,
                         unsigned char* encrypted_msg, int encrypted_len, 
                         unsigned char* aad, int aad_len,
                         unsigned char* iv,
                         unsigned char* key,
                         unsigned char* tag);
+
 int get_user_pubkey_text(char* username, int username_len, char* pubkey_txt);
 int MessageApp_launch_param_check (int n_input, char* args[]);
-int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char* iv);
+int MessageApp_handshake(int channel);
 // Threads
 void *MessageApp_client_connect(void *vargp);
 void* MessageApp_channel_0(void *vargp);
@@ -114,32 +116,43 @@ int channel_secure_send(int channel, unsigned char* iv, unsigned char* key, unsi
 // retuns received text length
 int channel_secure_receive(int channel, unsigned char* iv, unsigned char* key, unsigned char* clear_text)
 {
-    char* buff = malloc(MAX_BUFF);
-    char* tcp_msg;
+    char buff[MAX_BUFF];
+    char tcp_msg[MAX_BUFF];
     int msg_size;
     unsigned char rec_aad[16];
     unsigned char rec_tag[16];
+    fd_set read_set;
+    struct timeval timeout;
     
     printf("WAITING Message in Secure Channel (%d)...\n", channel);
+    timeout.tv_sec = 1800; // Time out after a minute
+    timeout.tv_usec = 0;
+
+    FD_ZERO(&read_set);
+    FD_SET(usr_data[channel].connfd, &read_set);
+
+    int r=select(usr_data[channel].connfd+1, &read_set, NULL, NULL, &timeout);
+
+    if( r<=0 ) {return 0;}
+    
     msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
 
     if ((msg_size>32)&&(msg_size<MAX_BUFF))
     {
-        tcp_msg = malloc(msg_size-32);
         for(int i=0;i<16;i++){rec_aad[i] = buff[i];}
         for(int i=0;i<16;i++){rec_tag[i] = buff[i+16];}
         for(int i=0;i<msg_size;i++){tcp_msg[i]=buff[i+32];}            
     }
     else { return 0;}
-    free(buff);
     
     unsigned char decrypt_buff[MAX_BUFF];
     int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-32, rec_aad, 16, iv, key, rec_tag);
     if (clear_len<0){printf("AES DECRYPTION FAILED at Channel (%d)", channel); return 0;}
 
-    clear_text = malloc(clear_len);
     for (int i=0;i<clear_len;i++)
         clear_text[i] = decrypt_buff[i];
+    
+    printf("DECRYPTION success in Secure channel: %s\n", clear_text);
     return clear_len;
 }
 
@@ -319,9 +332,9 @@ void *MessageApp_client_connect(void *vargp)
  
 }
 
-int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char* iv)
+int MessageApp_handshake(int channel)
 {
-    char* buff = malloc(MAX_BUFF);
+    char buff[MAX_BUFF];
     char* tcp_msg;
     int ret_val;
     int msg_size;
@@ -336,9 +349,11 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
             tcp_msg[i]=buff[i];
     }
     else {printf("Failed to receive hello from Client \n"); return 0;}
-    free(buff);
+    //free(buff);
     if(strcmp("hello",tcp_msg) != 0)
         return 0;
+    
+    free(tcp_msg);
     
     /** BEGIN COMPUTE AND SEND SIGNATURE USING RSA PRIVKEY  */
     FILE* privkey_file = fopen("MessageApp_key.pem", "r");
@@ -366,7 +381,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     EVP_MD_CTX_free(md_ctx);
     //EVP_MD_free(md);
     EVP_PKEY_free(privkey);
-    free(tcp_msg);
+
     
     /** SEND "hello" + signature */
     write(usr_data[channel].connfd, "hello", 5);
@@ -377,7 +392,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     /** END COMPUTE AND SEND SIGNATURE USING RSA PRIVKEY  */
     
     /** RECEIVE encrypted username from client */
-    buff = malloc(MAX_BUFF);
+    //buff = malloc(MAX_BUFF);
     msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
     printf("Encrypted Username received (%d)\n",msg_size);
     if ((msg_size>0)&&(msg_size<MAX_BUFF)) // maximum size for username is 16
@@ -387,7 +402,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
             tcp_msg[i]=buff[i];
     }
     else {printf("Failed to receive Username\n"); return 0;}
-    free(buff);
+    //free(buff);
     
     /** BEGIN DECRYPT username MESSAGE USING RSA PRIVKEY */
     // tcp_msg <- username encrypted by pubkey
@@ -421,7 +436,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     /** END DECRYPT username MESSAGE USING RSA PRIVKEY  */
     
     /** RECEIVE Client Signature */
-    buff = malloc(MAX_BUFF);
+    //buff = malloc(MAX_BUFF);
     msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
     printf("Encrypted Client Signature received (%d)\n",msg_size);
     if ((msg_size>0)&&(msg_size<MAX_BUFF)) 
@@ -431,7 +446,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
             tcp_msg[i]=buff[i];
     }
     else {printf("Failed to receive Client Signature \n"); return 0;}
-    free(buff);
+    //free(buff);
     
     /** BEGIN VERIFY CLIENT AUTENTICITY USING REGISTERED PUBKEY */
     char *pubkey_extension = "key.pem";
@@ -477,9 +492,9 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     
     /** BEGIN GENERATE FRESH IV - ENCRYPT WITH USER PUBKEY */
     RAND_poll();
-    iv = malloc(12);
-    RAND_bytes(iv, 12); // generate session IV
-    printf("IV: %s\n", iv);
+    //usr_data[channel].iv = malloc(12);
+    RAND_bytes(usr_data[channel].iv, 12); // generate session IV
+    printf("IV: %s\n", usr_data[channel].iv);
     
     unsigned char* out;
     
@@ -493,13 +508,13 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
 
     // Determine buffer size for encrypted length
-    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, iv, 12) <= 0){printf("Error: EVP_PKEY_encrypt\n"); return 0;}
+    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, usr_data[channel].iv, 12) <= 0){printf("Error: EVP_PKEY_encrypt\n"); return 0;}
             
     out = OPENSSL_malloc(outlen);
     if (out==NULL){printf("Malloc failed for username encryption\n"); return 0;}
 
     // encrypt using client pubkey
-    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, iv, 12);
+    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, usr_data[channel].iv, 12);
     if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
     
     // free(out);
@@ -524,7 +539,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     
     ret_val = EVP_DigestInit(md_ctx, EVP_sha256());
     if(ret_val<=0){printf("Error: DigestInit returned NULL\n"); return 0;}
-    ret_val = EVP_DigestUpdate(md_ctx, iv, 12);
+    ret_val = EVP_DigestUpdate(md_ctx, usr_data[channel].iv, 12);
     if(ret_val<=0){printf("Error: DigestUpdate returned NULL\n"); return 0;}
     ret_val = EVP_DigestFinal(md_ctx, digest, &digestlen);
     if(ret_val<=0){printf("Error: DigestFinal returned NULL\n"); return 0;}
@@ -532,17 +547,17 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     EVP_MD_CTX_free(md_ctx);
     //EVP_MD_free(md);
     printf("Digest is:\n");
-    session_key = malloc(digestlen);
+    //session_key = malloc(digestlen);
     for (int k=0;k<digestlen;k++){
         printf("%02x ", (unsigned char)digest[k]);
-        session_key[k] = digest[k];
+        usr_data[channel].key[k] = digest[k];
     }
     //*key_len = digestlen;
     free(digest);
     /** END GENERATE FRESH SESSION KEY */
     
     /** RECEIVE ENCRYPTED "finish" using SESSION KEY */
-    buff = malloc(MAX_BUFF);
+    //buff = malloc(MAX_BUFF);
     msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
     printf("\nEncrypted Finish received (%d)\n",msg_size);
     unsigned char rec_aad[16];
@@ -556,7 +571,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
             
     }
     else {printf("Failed to receive Finish\n"); return 0;}
-    free(buff);
+    //free(buff);
 
     printf("AAD is: ");
     for (int k=0;k<16;k++){
@@ -573,7 +588,7 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
     
     /** BEGIN DECRYPT "finish" using SESSION KEY and AES 256 GCM */
     unsigned char* decrypt_buff = malloc(MAX_BUFF);
-    int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-32, rec_aad, 16, iv, session_key, rec_tag);
+    int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-32, rec_aad, 16, usr_data[channel].iv, usr_data[channel].key, rec_tag);
     if (clear_len<0){printf("AES DECRYPTION FAILED at finish msg"); return 0;}
     /** END DECRYPT "finish" using SESSION KEY and AES 256 GCM */
     unsigned char* clear_msg = malloc(clear_len);
@@ -616,23 +631,29 @@ int MessageApp_handshake(int channel, unsigned char* session_key, unsigned char*
 // Function designed for chat between client and server.
 void* MessageApp_channel_0(void *vargp)
 {
-    char *buff = malloc(MAX_BUFF);
-    char* client_msg;
+    char client_msg[MAX_BUFF];
     int client_msg_len;
-    char cmd[4] = {0};
-    char *data;
+    char rec_cmd[4] = {0};
+    char data[MAX_BUFF];
     int channel = 0;
-    char* msg_to_send;
+    char *msg_to_send;
     int friend_channel;
     int user_pubkey_len;
     char *user_pubkey;
     int in_chat_flag = 0;
+    char *cmd_chat ="chat";
+    char *cmd_reqt ="reqt";
+    char *cmd_acpt ="acpt";
+    char *cmd_refu ="refu";
+    char *cmd_frwd = "frwd";
+    char *cmd_list = "list";
+    char *cmd_exit ="exit";
     
     pthread_mutex_lock(&mutex_channel[0]);    
     printf("Channel 0 Connected (Non-Secure)\nBegin Handshake...\n");
     
     // begin HANDSHAKE protocol - it returns the session key, the iv, and will set the username and username_len for this channel
-    if (MessageApp_handshake(channel, usr_data[channel].key, usr_data[channel].iv) !=1) // key is 32 bytes long - iv is 12 bytes long
+    if (MessageApp_handshake(channel) !=1) // key is 32 bytes long - iv is 12 bytes long
     {
         printf("Handshake FAILED\n");
         close(usr_data[channel].connfd);
@@ -648,21 +669,21 @@ void* MessageApp_channel_0(void *vargp)
         /** Receive messages from logged Users */
         client_msg_len = channel_secure_receive(channel, usr_data[channel].iv, usr_data[channel].key, client_msg); // client_msg is tainted!
         
-        if (client_msg_len > 0){
-            for (int i=0;i<4;i++){cmd[i]=client_msg[i];} // Save received COMMAND
-            data = malloc(client_msg_len-4);
+        if (client_msg_len > 4){
+            for (int i=0;i<4;i++){rec_cmd[i]=client_msg[i];} // Save received COMMAND
             for (int i=0;i<client_msg_len-4;i++){data[i]=client_msg[i+4];} // Save received DATA
             
             /** process Command from client */
-            if ((strncmp("chat", cmd, 4) == 0)&&(in_chat_flag == 0)&&(usr_data[friend_channel].pending == 0)){ // Request to chat with another user
+            if ((strncmp(cmd_chat, rec_cmd, 4) == 0)&&(in_chat_flag == 0)&&(usr_data[friend_channel].pending == 0)){ // Request to chat with another user
                 if((client_msg_len-4)<16){
                     friend_channel = 0;
                     for(int n=0;n<MAX_CHANNELS;n++){ // search the friend username on the channels
                         if (strncmp(data, usr_data[friend_channel].username, usr_data[friend_channel].username_len) == 0){ // found matching username fomr database
                             msg_to_send = malloc(4+usr_data[channel].username_len);
-                            strcat(msg_to_send, "reqt");
-                            strcat(msg_to_send, usr_data[channel].username); // Send "reqt" command follwed by the Username of the Request agent
-                            printf("Sending in Channel (%d) TO Channel (%d) - PLAINTEXT: %s", channel, friend_channel, msg_to_send);
+                            for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
+                            for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
+                            printf("Sending in Channel (%d) TO Channel (%d) - PLAINTEXT(%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
+                            write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
                             //channel_secure_send(friend_channel, usr_data[friend_channel].iv, usr_data[friend_channel].key, msg_to_send, 4+usr_data[channel].username_len); 
                             free(msg_to_send);
                             usr_data[friend_channel].pending = 1;
@@ -675,7 +696,7 @@ void* MessageApp_channel_0(void *vargp)
                 }
                 else {channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, "erroUsername incorrect", 22);}
             }
-            else if ((strncmp("acpt", cmd, 4) == 0)&&(usr_data[channel].pending == 1)){ // User accepted connexion from friend
+            else if ((strncmp(cmd_acpt, rec_cmd, 4) == 0)&&(usr_data[channel].pending == 1)){ // User accepted connexion from friend
                 usr_data[channel].pending = 0;
                 in_chat_flag = 1;
                 if((client_msg_len-4)<16){
@@ -687,7 +708,7 @@ void* MessageApp_channel_0(void *vargp)
                             strcat(msg_to_send, "pubk");
                             strcat(msg_to_send, user_pubkey); // This is pukey for the REQUEST agent
                             free(user_pubkey);
-                            printf("SENDING PUB KEY TO %s", usr_data[friend_channel].username);
+                            printf("SENDING PUB KEY TO %s\n", usr_data[friend_channel].username);
                             //channel_secure_send(friend_channel, usr_data[friend_channel].iv, usr_data[friend_channel].key, msg_to_send, 4+user_pubkey_len); // found 
                             free(msg_to_send);
                             
@@ -696,7 +717,7 @@ void* MessageApp_channel_0(void *vargp)
                             strcat(msg_to_send, "pubk");
                             strcat(msg_to_send, user_pubkey); // This is pukey for the ACCEPT agent
                             free(user_pubkey);
-                            printf("SENDING PUB KEY TO %s", usr_data[channel].username);
+                            printf("SENDING PUB KEY TO %s\n", usr_data[channel].username);
                             //channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, msg_to_send, 4+user_pubkey_len); // found 
                             free(msg_to_send);
                             break;} 
@@ -708,20 +729,21 @@ void* MessageApp_channel_0(void *vargp)
                 else {channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, "erroUsername incorrect", 22);}
                 // Send pubkeys                
             }
-            else if ((strncmp("refu", cmd, 4) == 0)&&(usr_data[channel].pending == 1)){
+            else if ((strncmp(cmd_refu, rec_cmd, 4) == 0)&&(usr_data[channel].pending == 1)){
                 usr_data[channel].pending = 0;                 
             }
-            else if ((strncmp("frwd", cmd, 4) == 0)&&(in_chat_flag == 1)){
+            else if ((strncmp(cmd_frwd, rec_cmd, 4) == 0)&&(in_chat_flag == 1)){
                              
             }
-            else if (strncmp("list", cmd, 4) == 0){
+            else if (strncmp(cmd_list, rec_cmd, 4) == 0){
                              
             }  
-            else if (strncmp("exit", cmd, 4) == 0){
+            else if (strncmp(cmd_exit, rec_cmd, 4) == 0){
                              
             }        
         }
-        else {sleep(1); close(usr_data[channel].connfd); }
+        else if (client_msg_len>0){printf("Received msg Error (%d)\n",client_msg_len);}
+        else {close (usr_data[channel].connfd); break;}
     }
     // close(server_sockfd);
     for(;;);

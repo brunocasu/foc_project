@@ -36,6 +36,7 @@ unsigned char* friend_pubkey_txt;
 char friend_iv[12];
 char friend_session_key[32];
 
+int hash_256_bits(unsigned char* input, int input_len, unsigned char* output);
     
 int OpenConnection(const char *hostname, int port)
 {
@@ -220,10 +221,127 @@ int server_secure_receive(int sockfd, unsigned char* iv, unsigned char* key, uns
     return clear_len;
 }
 
+int hash_256_bits(unsigned char* input, int input_len, unsigned char* output)
+{
+    unsigned char* digest;
+    unsigned int digestlen;
+    int ret_val;
+    
+    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    digest = (unsigned char* ) malloc(EVP_MD_size(EVP_sha256()));
+    if(digest==NULL){printf("Error: malloc failed for digest\n"); return 0;}
+    
 
+    ret_val = EVP_DigestInit(md_ctx, EVP_sha256());
+    if(ret_val<=0){printf("Error: DigestInit returned NULL\n"); return 0;}
+    ret_val = EVP_DigestUpdate(md_ctx, input, input_len);
+    if(ret_val<=0){printf("Error: DigestUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_DigestFinal(md_ctx, digest, &digestlen);
+    if(ret_val<=0){printf("Error: DigestFinal returned NULL\n"); return 0;}
+    
+    EVP_MD_CTX_free(md_ctx);
+    printf("\nDigest is (%d): ", digestlen);
+
+    for (int k=0;k<digestlen;k++){
+        output[k] = digest[k];
+        printf("%02x ", (unsigned char)output[k]);
+    }
+
+    free(digest);
+    return digestlen;
+}
 
 
 int ClientHandshake()
+{
+    char buff[MAX_BUFF];
+    int msg_size;
+    char* tcp_msg;
+    int ret_val;
+    EVP_MD_CTX* md_ctx;
+    
+    unsigned char handshake_noce_R1[32];
+    unsigned char handshake_noce_R2[32];
+    unsigned char challenge_noce[32];
+    unsigned char rand_val[32];
+    
+    // Begin Handshake
+    /** SEND R1 */
+    RAND_poll();
+    RAND_bytes(rand_val, 32);
+    hash_256_bits(rand_val, 32, handshake_noce_R1);
+    printf("Send Hello to server \n");
+    write(sockfd, handshake_noce_R1, 32); // Send R1
+    
+    /** RECEIVE TempPubkey + R2 + {R1+TempPubkey+R2}signed */
+    msg_size = read(sockfd, buff, MAX_BUFF);
+    printf("\nHello received (%d)\n", msg_size);
+    unsigned char TempPubkey_txt[426];
+    unsigned char handshake_cmp_buff[490]; // 32 + 426 + 32 -> {R1 + TempPubkey + R2}
+    unsigned char *server_signature;
+    for (int i=0;i<32;i++){handshake_cmp_buff[i] = handshake_noce_R1[i];}
+    
+    if ((msg_size>458)&&(msg_size<MAX_BUFF))
+    {
+        for (int i=0;i<426;i++){TempPubkey_txt[i] = buff[i]; handshake_cmp_buff[i+32]=buff[i];}
+        printf("PUBKEY TXT: %s\n", TempPubkey_txt);
+        for (int i=0;i<32;i++){handshake_noce_R2[i] = buff[i+426]; handshake_cmp_buff[i+458]=buff[i+426];}
+        server_signature = malloc(msg_size-458);
+        for (int i=0;i<msg_size-458;i++){server_signature[i] = buff[i+458];}
+        printf("Server Signature received (%d): \n",msg_size-458);
+    }
+    else {printf("Hello Received Error\n"); return 0;}
+    
+    printf("\nR1 + TempPubk + 2: ");
+
+    for (int k=0;k<490;k++){
+        printf("%02x ", (unsigned char)handshake_cmp_buff[k]);
+    }
+    
+    /** BEGIN AUTHENTICATE SERVER USING CERTIFICATE **/
+    FILE* cert_file = fopen("MessageApp_cert.pem", "r");
+    if(cert_file==NULL){printf("Certificate File Open Error\n"); return 0;}
+    X509* cert = PEM_read_X509(cert_file, NULL, NULL, NULL);
+    fclose(cert_file);
+    if(cert==NULL){printf("Error: PEM_read_X509 returned NULL\n"); return 0;}
+    
+    char* tmp = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
+    char* tmp2 = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+    printf("\nCertificate of %s\n issued by %s\n",tmp, tmp2);
+    free(tmp);
+    free(tmp2);
+    // create new context
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_VerifyInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyUpdate(md_ctx, handshake_cmp_buff, 490);  
+    if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyFinal(md_ctx, server_signature, msg_size-458, X509_get_pubkey(cert)); // compare the signed message with the clear text - authenticate using certificate
+    if(ret_val==1)
+        printf("Server Authenticated!\n");
+    else{
+        printf("Server Authentication FAILED (%d)\n", ret_val);
+        return 0;}
+    EVP_MD_CTX_free(md_ctx);
+    /** END AUTHENTICATE SERVER USING CERTIFICATE **/
+    
+    /** BEGIN ENCRYPT R1 + R2 + IV USING TEMP PUBKEY**/
+    // generate IV - premaster secret
+    
+    // BIO *BIO_new_mem_buf(const void *buf, int len); // Pubkey <- Pubkey_txt
+    
+    /** END ENCRYPT R1 + R2 + IV USING TEMP PUBKEY **/
+    
+    /** SEND {R1 + R2 + IV}TempPubkey */
+    
+    
+}
+
+int ClientHandshake_old()
 {
     char *buff = malloc(MAX_BUFF);
     int msg_size;
@@ -614,7 +732,7 @@ int main(int count, char *args[])
     sockfd = OpenConnection(hostname, portnum);
 
     if (ClientHandshake() == 1){ // From the handshake, Client gets the session_key and iv
-        
+        for(;;); // WARNING Remove this
         printf("\nCONNECTED to MessageApp\n");
         // function for chat
         pthread_create(&rec_id, NULL, receiver_Task, NULL);

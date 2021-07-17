@@ -340,7 +340,154 @@ void *MessageApp_client_connect(void *vargp)
  
 }
 
+
+int hash_256_bits(char* input, int input_len, unsigned char* output)
+{
+    unsigned char* digest;
+    unsigned int digestlen;
+    int ret_val;
+    
+    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    digest = (unsigned char* ) malloc(EVP_MD_size(EVP_sha256()));
+    if(digest==NULL){printf("Error: malloc failed for digest\n"); return 0;}
+    
+
+    ret_val = EVP_DigestInit(md_ctx, EVP_sha256());
+    if(ret_val<=0){printf("Error: DigestInit returned NULL\n"); return 0;}
+    ret_val = EVP_DigestUpdate(md_ctx, input, input_len);
+    if(ret_val<=0){printf("Error: DigestUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_DigestFinal(md_ctx, digest, &digestlen);
+    if(ret_val<=0){printf("Error: DigestFinal returned NULL\n"); return 0;}
+    
+    EVP_MD_CTX_free(md_ctx);
+    printf("\nDigest is (%d): ", digestlen);
+
+    for (int k=0;k<digestlen;k++){
+        output[k] = digest[k];
+        printf("%02x ", (unsigned char)output[k]);
+    }
+
+    free(digest);
+    return digestlen;
+}
+
+
 int MessageApp_handshake(int channel)
+{
+    char buff[MAX_BUFF];
+    char* tcp_msg;
+    int ret_val=0;
+    int msg_size=0;
+    EVP_MD_CTX* md_ctx;
+    
+    unsigned char handshake_noce_R1[32];
+    unsigned char handshake_noce_R2[32];
+    unsigned char challenge_noce[32];
+    unsigned char rand_val[32];
+    
+    /** RECEIVE Client hello */
+    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
+    if (msg_size==32)
+    {
+        for (int i=0;i<msg_size;i++)
+            handshake_noce_R1[i]=buff[i];
+    }
+    
+    /** BEGIN GENERATE TEMPORARY RSA 2048 KEY PAIR **/
+    char *TempPubkey_txt;
+    int TempPubkey_txt_len;
+    
+    BIO *bp_TempPubkey = NULL;
+    BIO *bp_TempPrivkey = NULL;
+    // EVP_PKEY *TempPubkey = NULL;
+    EVP_PKEY *TempPrivkey = NULL;
+    
+    RSA *r = NULL;
+    BIGNUM *bne = NULL;
+
+    bne = BN_new();
+    ret_val = BN_set_word(bne, RSA_F4);
+    if (ret_val != 1) {printf("BN_set_word FAILED\n"); return 0;}
+
+    r = RSA_new();
+    ret_val = RSA_generate_key_ex(r, 2048, bne, NULL);
+    if (ret_val != 1) {printf("RSA_generate_key_ex FAILED\n"); return 0;} 
+
+    bp_TempPrivkey = BIO_new(BIO_s_mem());
+    ret_val = PEM_write_bio_RSAPrivateKey(bp_TempPrivkey, r, NULL, NULL, 0, NULL, NULL);
+    if (ret_val != 1) {printf("PEM_write_bio_RSAPrivateKey FAILED\n"); return 0;} 
+    
+    TempPrivkey = PEM_read_bio_PrivateKey(bp_TempPrivkey, &TempPrivkey, NULL, NULL); // Temporary PrivKey RSA 2048
+    if (TempPrivkey==NULL) {printf("PEM_read_bio_PrivateKey FAILED\n"); return 0;}
+    
+    bp_TempPubkey = BIO_new(BIO_s_mem());
+    ret_val = PEM_write_bio_RSAPublicKey(bp_TempPubkey, r);
+    if (ret_val != 1) {printf("PEM_write_bio_RSAPublicKe FAILED\n"); return 0;} // BIO Temporary PubKey RSA 2048
+    
+    TempPubkey_txt_len = BIO_pending(bp_TempPubkey);
+    TempPubkey_txt = (char*) malloc(TempPubkey_txt_len);
+    BIO_read(bp_TempPubkey, TempPubkey_txt, TempPubkey_txt_len); // TXT Temporary PubKey RSA 2048 
+    printf("Generated TEMP PUBKEY (%d): %s",TempPubkey_txt_len ,TempPubkey_txt);            
+    /** END GENERATE TEMPORARY RSA 2048 KEY PAIR **/
+    
+    /** BEGIN GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
+    RAND_poll();
+    RAND_bytes(rand_val, 32);
+    hash_256_bits(rand_val, 32, handshake_noce_R2);
+    
+    char noce_buff[TempPubkey_txt_len+64];
+    for (int i=0;i<32;i++){noce_buff[i] = handshake_noce_R1[i];}
+    for (int i=0;i<TempPubkey_txt_len;i++){noce_buff[i+32] = TempPubkey_txt[i];}
+    for (int i=0;i<32;i++){noce_buff[i+TempPubkey_txt_len+32] = handshake_noce_R2[i];}
+    
+    printf("\nR1 + TempPubk + 2 (%d): ", TempPubkey_txt_len+64);
+    for (int k=0;k<490;k++){
+        printf("%02x ", (unsigned char)noce_buff[k]);
+    }
+    
+    FILE* privkey_file = fopen("MessageApp_key.pem", "r");
+    if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
+    EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
+    fclose(privkey_file);
+    if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
+    
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    unsigned char* sgnt_buff = (unsigned char*)malloc(EVP_PKEY_size(privkey));
+    if(sgnt_buff==NULL) {printf("Error: malloc returned NULL\n"); return 0;}
+    
+    ret_val = EVP_SignInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_SignInit returned %d\n",ret_val); return 0;}
+    ret_val = EVP_SignUpdate(md_ctx, noce_buff, TempPubkey_txt_len+64);
+    if(ret_val == 0){printf("Error: EVP_SignUpdate returned %d\n",ret_val); return 0;}
+    unsigned int sgnt_size;
+    ret_val = EVP_SignFinal(md_ctx, sgnt_buff, &sgnt_size, privkey); // return the signed message
+    if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
+    printf("\nServer Signature size (%d)\n", sgnt_size);
+    
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(privkey);
+    /** BEGIN GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
+    
+    /** SEND TempPubkey + R2 + {R1+TempPubkey+R2}signed */
+    for (int i=0;i<TempPubkey_txt_len+32;i++){buff[i] = noce_buff[i+32];}
+    for (int i=0;i<sgnt_size;i++){buff[i+TempPubkey_txt_len+32] = sgnt_buff[i];}
+    
+    printf("Sending signature in Channel (%d) len (%d)\n", channel, TempPubkey_txt_len+32+sgnt_size);
+    write(usr_data[channel].connfd, buff, TempPubkey_txt_len+32+sgnt_size);
+    
+    /** **/
+    
+    
+    return 1;
+}
+
+
+
+int MessageApp_handshake_old(int channel)
 {
     char buff[MAX_BUFF];
     char* tcp_msg;
@@ -673,6 +820,7 @@ void* MessageApp_channel_0(void *vargp)
         printf("Handshake SUCCESS Channel (%d) Connected (Secure) User: <%s>\n", channel, usr_data[channel].username);
     
     usr_data[channel].pending = 0; // start with no pendencies
+    for(;;); // WARNING Remove this
     // infinite loop for chat
     for (;;)
     {
@@ -777,7 +925,6 @@ int main(int n_input, char *input_args[])
         printf("MessageApp launch FAILED\n");
         exit(0);
     }
-    
     server_sockfd = MessageApp_OpenListener(port);
   
     pthread_create(&thread_id[0], NULL, MessageApp_client_connect, NULL);

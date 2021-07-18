@@ -24,7 +24,7 @@
 #define MAX_BUFF 65535                                                           
 #define PORT 8081                                                        
 #define SA struct sockaddr
-#define MAX_CHANNELS    4
+#define MAX_CHANNELS    2
 
 struct client_id {
     char* username;
@@ -378,12 +378,12 @@ int hash_256_bits(char* input, int input_len, unsigned char* output)
     
     EVP_MD_CTX_free(md_ctx);
     //printf("Digest is (%d): ", digestlen);
-    //
-    //for (int k=0;k<digestlen;k++){
-    //    output[k] = digest[k];
-    //    printf("%02x ", (unsigned char)output[k]);
-    //}
-    //printf("\n");
+    
+    for (int k=0;k<digestlen;k++){
+        output[k] = digest[k];
+        //printf("%02x ", (unsigned char)output[k]);
+    }
+    printf("\n");
     free(digest);
     return digestlen;
 }
@@ -517,8 +517,11 @@ int MessageApp_handshake(int channel)
     EVP_PKEY_free(TempPrivkey);
     EVP_PKEY_CTX_free(ctx_p);
     for (int i=0;i<12;i++){usr_data[channel].iv[i] = secret[i+96];} // Save session IV
-    printf("\nSESSION KEY: ");
-    hash_256_bits(secret, outlen, usr_data[channel].key); // compute session key        
+    printf("\nCHANNEL (%d) SESSION KEY: ", channel);
+    hash_256_bits(secret, outlen, usr_data[channel].key); // compute session key
+    for (int k=0;k<32;k++){
+        printf("%02x ", usr_data[channel].key[k]);
+    }
     /** END DECRYPT PRE MASTER SECRET AND IV USING TEMP PRIVKEY **/
     
     // Client Authentication -- For now on all the communication is secured through a Shared Symmetric Key and encrypted in AES_256_GCM with authentication
@@ -580,306 +583,17 @@ int MessageApp_handshake(int channel)
     /** BEGIN AUTHENTICATE USER BY PUBKEY **/
     
     // finish handshake
+    char* finsh_1 = "USER <";
+    char* finsh_2 = "> AUTHENTICATED IN MessageApp";
+    char* finish_msg = malloc(strlen(finsh_1)+usr_data[channel].username_len+strlen(finsh_1));
+    for (int i=0;i<strlen(finsh_1);i++){finish_msg[i]=finsh_1[i];}
+    for (int i=0;i<usr_data[channel].username_len;i++){finish_msg[i+strlen(finsh_1)]=usr_data[channel].username[i];}
+    for (int i=0;i<strlen(finsh_2);i++){finish_msg[i+strlen(finsh_1)+usr_data[channel].username_len]=finsh_2[i];}
+    channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, finish_msg, strlen(finish_msg));
     
     return 1;
 }
 
-
-
-int MessageApp_handshake_old(int channel)
-{
-    char buff[MAX_BUFF];
-    char* tcp_msg;
-    int ret_val;
-    int msg_size;
-    
-    pthread_mutex_lock(&mutex_handshake);
-    /** RECEIVE Client hello */
-    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
-    if ((msg_size>0)&&(msg_size<MAX_BUFF))
-    {
-        tcp_msg = malloc(msg_size);
-        for (int i=0;i<msg_size;i++)
-            tcp_msg[i]=buff[i];
-    }
-    else {printf("Failed to receive hello from Client \n"); return 0;}
-    //free(buff);
-    if(strcmp("hello",tcp_msg) != 0)
-        return 0;
-    
-    free(tcp_msg);
-    
-    /** BEGIN COMPUTE AND SEND SIGNATURE USING RSA PRIVKEY  */
-    FILE* privkey_file = fopen("MessageApp_key.pem", "r");
-    if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
-    EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
-    fclose(privkey_file);
-    if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
-    
-    const EVP_MD* md = EVP_sha256();
-    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
-    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
-    
-    unsigned char* sgnt_buf = (unsigned char*)malloc(EVP_PKEY_size(privkey));
-    if(sgnt_buf==NULL) {printf("Error: malloc returned NULL\n"); return 0;}
-    
-    ret_val = EVP_SignInit(md_ctx, EVP_sha256());
-    if(ret_val == 0){printf("Error: EVP_SignInit returned %d\n",ret_val); return 0;}
-    ret_val = EVP_SignUpdate(md_ctx, "hello", 5);
-    if(ret_val == 0){printf("Error: EVP_SignUpdate returned %d\n",ret_val); return 0;}
-    unsigned int sgnt_size;
-    ret_val = EVP_SignFinal(md_ctx, sgnt_buf, &sgnt_size, privkey);
-    if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
-    printf("Server Signature size (%d)\n", sgnt_size);
-    // delete the digest from memory:
-    EVP_MD_CTX_free(md_ctx);
-    //EVP_MD_free(md);
-    EVP_PKEY_free(privkey);
-
-    
-    /** SEND "hello" + signature */
-    write(usr_data[channel].connfd, "hello", 5);
-    sleep(1);
-    write(usr_data[channel].connfd, sgnt_buf, sgnt_size);
-    printf("Server Signature sent (%d) in Channel (%d)\nWaiting for Client Username...\n", sgnt_size, channel);
-    free(sgnt_buf);
-    /** END COMPUTE AND SEND SIGNATURE USING RSA PRIVKEY  */
-    
-    /** RECEIVE encrypted username from client */
-    //buff = malloc(MAX_BUFF);
-    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
-    printf("Encrypted Username received (%d)\n",msg_size);
-    if ((msg_size>0)&&(msg_size<MAX_BUFF)) // maximum size for username is 16
-    {
-        tcp_msg = malloc(msg_size);
-        for (int i=0;i<msg_size;i++)
-            tcp_msg[i]=buff[i];
-    }
-    else {printf("Failed to receive Username\n"); return 0;}
-    //free(buff);
-    
-    /** BEGIN DECRYPT username MESSAGE USING RSA PRIVKEY */
-    // tcp_msg <- username encrypted by pubkey
-    // decrypt using privkey
-    privkey_file = fopen("MessageApp_key.pem", "r");
-    if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
-    privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
-    fclose(privkey_file);
-    if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
-    
-    unsigned char *decrypted_msg;
-    size_t outlen;
-    // Decrypt Received Message using privkey
-    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(privkey, NULL);
-    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
-    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
-    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
-    /* Determine buffer length */
-    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, tcp_msg, msg_size) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
-    
-    decrypted_msg = OPENSSL_malloc(outlen);
-    if (!decrypted_msg){printf("Malloc Failed for decrypted message\n"); return 0;}
-        
-    ret_val = EVP_PKEY_decrypt(ctx_p, decrypted_msg, &outlen, tcp_msg, msg_size);
-    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
-    
-    EVP_PKEY_free(privkey);
-    EVP_PKEY_CTX_free(ctx_p);
-    free(tcp_msg);
-    printf("DECRYPTED username (%ld): %s\n",outlen, decrypted_msg);
-    /** END DECRYPT username MESSAGE USING RSA PRIVKEY  */
-    
-    /** RECEIVE Client Signature */
-    //buff = malloc(MAX_BUFF);
-    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
-    printf("Encrypted Client Signature received (%d)\n",msg_size);
-    if ((msg_size>0)&&(msg_size<MAX_BUFF)) 
-    {
-        tcp_msg = malloc(msg_size);
-        for (int i=0;i<msg_size;i++)
-            tcp_msg[i]=buff[i];
-    }
-    else {printf("Failed to receive Client Signature \n"); return 0;}
-    //free(buff);
-    
-    /** BEGIN VERIFY CLIENT AUTENTICITY USING REGISTERED PUBKEY */
-    char *pubkey_extension = "key.pem";
-    char *filename = malloc(outlen+7);
-    for (int i=0;i<outlen;i++)
-        filename[i] = decrypted_msg[i];
-    for (int n=0;n<7;n++)
-        filename[n+outlen] = pubkey_extension[n];
-    
-    printf("Trying to open: <%s> \n", filename);
-    FILE* clientpubkey_file = fopen(filename, "r");
-    if(clientpubkey_file==NULL){printf("USERNAME NOT REGISTERED\n"); write(usr_data[channel].connfd, "USERNAME NOT REGISTERED", 22); return 0;}
-    EVP_PKEY* clientpubkey = PEM_read_PUBKEY(clientpubkey_file, NULL, NULL, NULL);
-    fclose(clientpubkey_file);
-    if(clientpubkey==NULL){printf("Error: PEM_read_PUBKEY returned NULL\n"); return 0;}
-    
-    // create the signature context:
-    md_ctx = EVP_MD_CTX_new();
-    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
-    
-    md = EVP_sha256();
-    ret_val = EVP_VerifyInit(md_ctx, EVP_sha256());
-    if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
-    ret_val = EVP_VerifyUpdate(md_ctx, decrypted_msg, outlen);  
-    if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
-    ret_val = EVP_VerifyFinal(md_ctx, tcp_msg, msg_size, clientpubkey);
-    if(ret_val==1)
-        printf("Client Authenticated! Username: <%s>\n", decrypted_msg);
-    else{printf("Client Authentication FAILED (%d)\n", ret_val); return 0;}
-        
-    EVP_MD_CTX_free(md_ctx);
-    // EVP_MD_free(md);
-    // EVP_PKEY_free(clientpubkey);
-    free(tcp_msg);
-    usr_data[channel].username = malloc(outlen);
-    usr_data[channel].username_len = outlen;
-    for (int h=0;h<outlen;h++)
-        usr_data[channel].username[h] = decrypted_msg[h];
-    
-    free(decrypted_msg);
-    /** END VERIFY CLIENT AUTENTICITY USING REGISTERED PUBKEY */
-    
-    
-    /** BEGIN GENERATE FRESH IV - ENCRYPT WITH USER PUBKEY */
-    RAND_poll();
-    //usr_data[channel].iv = malloc(12);
-    RAND_bytes(usr_data[channel].iv, 12); // generate session IV
-    printf("IV: %s\n", usr_data[channel].iv);
-    
-    unsigned char* out;
-    
-    ctx_p = EVP_PKEY_CTX_new(clientpubkey, NULL);
-    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
-    
-    ret_val = EVP_PKEY_encrypt_init(ctx_p);
-    if(ret_val <= 0){printf("Error: EVP_PKEY_encrypt_init\n"); return 0;}
-    
-    ret_val = EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING);
-    if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
-
-    // Determine buffer size for encrypted length
-    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, usr_data[channel].iv, 12) <= 0){printf("Error: EVP_PKEY_encrypt\n"); return 0;}
-            
-    out = OPENSSL_malloc(outlen);
-    if (out==NULL){printf("Malloc failed for username encryption\n"); return 0;}
-
-    // encrypt using client pubkey
-    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, usr_data[channel].iv, 12);
-    if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
-    
-    // free(out);
-    EVP_PKEY_CTX_free(ctx_p);
-    EVP_PKEY_free(clientpubkey);
-    
-    /** SEND RSA PUBKEY ENCRYPTED IV */
-    printf("Sending IV Encrypted with Client pubkey (%ld)\n", outlen);
-    write(usr_data[channel].connfd, out, outlen);
-    /** END GENERATE FRESH IV - ENCRYPT WITH USER PUBKEY */
-
-    
-    /** BEGIN GENERATE FRESH SESSION KEY */
-    unsigned char* digest;
-    unsigned int digestlen;
-    
-    md_ctx = EVP_MD_CTX_new();
-    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
-    
-    digest = (unsigned char* ) malloc(EVP_MD_size(EVP_sha256()));
-    if(digest==NULL){printf("Error: malloc failed for digest\n"); return 0;}
-    
-    ret_val = EVP_DigestInit(md_ctx, EVP_sha256());
-    if(ret_val<=0){printf("Error: DigestInit returned NULL\n"); return 0;}
-    ret_val = EVP_DigestUpdate(md_ctx, usr_data[channel].iv, 12);
-    if(ret_val<=0){printf("Error: DigestUpdate returned NULL\n"); return 0;}
-    ret_val = EVP_DigestFinal(md_ctx, digest, &digestlen);
-    if(ret_val<=0){printf("Error: DigestFinal returned NULL\n"); return 0;}
-    
-    EVP_MD_CTX_free(md_ctx);
-    //EVP_MD_free(md);
-    printf("Digest is:\n");
-    //session_key = malloc(digestlen);
-    for (int k=0;k<digestlen;k++){
-        printf("%02x ", (unsigned char)digest[k]);
-        usr_data[channel].key[k] = digest[k];
-    }
-    //*key_len = digestlen;
-    free(digest);
-    /** END GENERATE FRESH SESSION KEY */
-    
-    /** RECEIVE ENCRYPTED "finish" using SESSION KEY */
-    //buff = malloc(MAX_BUFF);
-    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
-    printf("\nEncrypted Finish received (%d)\n",msg_size);
-    unsigned char rec_aad[16];
-    unsigned char rec_tag[16];
-    if ((msg_size>32)&&(msg_size<MAX_BUFF)) // maximum size for username is 16
-    {
-        tcp_msg = malloc(msg_size-32);
-        for(int i=0;i<16;i++){rec_aad[i] = buff[i];}
-        for(int i=0;i<16;i++){rec_tag[i] = buff[i+16];}
-        for(int i=0;i<msg_size;i++){tcp_msg[i]=buff[i+32];}
-            
-    }
-    else {printf("Failed to receive Finish\n"); return 0;}
-    //free(buff);
-
-    printf("AAD is: ");
-    for (int k=0;k<16;k++){
-        printf("%02x ", (unsigned char)rec_aad[k]);
-    }
-    printf("\nTag is: ");
-    for (int k=0;k<16;k++){
-        printf("%02x ", (unsigned char)rec_tag[k]);
-    }    
-    printf("\nCyp is: ");
-    for (int k=0;k<msg_size-32;k++){
-        printf("%02x ", (unsigned char)tcp_msg[k]);
-    }    
-    
-    /** BEGIN DECRYPT "finish" using SESSION KEY and AES 256 GCM */
-    unsigned char* decrypt_buff = malloc(MAX_BUFF);
-    int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-32, rec_aad, 16, usr_data[channel].iv, usr_data[channel].key, rec_tag);
-    if (clear_len<0){printf("AES DECRYPTION FAILED at finish msg"); return 0;}
-    /** END DECRYPT "finish" using SESSION KEY and AES 256 GCM */
-    unsigned char* clear_msg = malloc(clear_len);
-    for (int i=0;i<clear_len;i++)
-        clear_msg[i] = decrypt_buff[i];
-    printf("\nclear_msg (%d): %s\n",clear_len, clear_msg);
-    
-    if (strcmp("finish", clear_msg) == 0){printf("AES 256 SUCESS!!\n");}
-        
-    /** BEGIN ENCRYPT "finish" using SESSION KEY and AES 256 GCM */
-    ///RAND_poll();
-    ///unsigned char aad[16];
-    ///RAND_bytes(aad, 16);
-    ///unsigned char tag[16];
-    ///
-    ///outlen = EncryptAES_256_GCM( out, clear_msg, val, aad, 16, iv, session_key, tag);
-    ///if (outlen<=0){printf("Error: EncryptAES_256_GCM\n"); return 0;}
-    ///
-    ///unsigned char* enc_finish = malloc(outlen+sizeof(aad)+16);
-    ///for (int v=0;v<sizeof(aad);v++)
-    ///    enc_finish[v] = aad[v];
-    ///for (int v=sizeof(aad);v<(sizeof(tag)+sizeof(aad));v++)
-    ///    enc_finish[v] = tag[v];
-    ///for (int v=(sizeof(tag)+sizeof(aad));v<(sizeof(tag)+sizeof(aad)+outlen);v++)
-    ///    enc_finish[v] = out[v];
-    ///
-    ////** END ENCRYPT "finish" using SESSION KEY and AES 256 GCM */
-    ///
-    ////** SEND encrypted "finish" using SESSION KEY */
-    ///printf("Send finish encrypted shared Key (%ld) (%ld)\n", sizeof(enc_finish), outlen);
-    ///write(usr_data[channel].connfd, enc_finish, sizeof(enc_finish));
-    ///free(enc_finish);
-    
-    // finished handshake
-    pthread_mutex_unlock(&mutex_handshake);
-    return 1;
-}
 
 
 // Function designed for chat between client and server.
@@ -906,7 +620,7 @@ void* MessageApp_channel_0(void *vargp)
     char *cmd_exit ="exit";
     
     pthread_mutex_lock(&mutex_channel[0]);    
-    printf("Channel 0 Connected (Non-Secure)\nBegin Handshake...\n");
+    printf("Channel (%d) Connected (Non-Secure)\nBegin Handshake...\n", channel);
     
     // begin HANDSHAKE protocol - it returns the session key, the iv, and will set the username and username_len for this channel
     if (MessageApp_handshake(channel) !=1) // key is 32 bytes long - iv is 12 bytes long
@@ -1034,8 +748,8 @@ void* MessageApp_channel_1(void *vargp)
     char *cmd_list = "list";
     char *cmd_exit ="exit";
     
-    pthread_mutex_lock(&mutex_channel[0]);    
-    printf("Channel 1 Connected (Non-Secure)\nBegin Handshake...\n");
+    pthread_mutex_lock(&mutex_channel[1]);    
+    printf("Channel (%d) Connected (Non-Secure)\nBegin Handshake...\n", channel);
     
     // begin HANDSHAKE protocol - it returns the session key, the iv, and will set the username and username_len for this channel
     if (MessageApp_handshake(channel) !=1) // key is 32 bytes long - iv is 12 bytes long
@@ -1157,9 +871,11 @@ int main(int n_input, char *input_args[])
   
     pthread_create(&thread_id[0], NULL, MessageApp_client_connect, NULL);
     pthread_create(&thread_id[1], NULL, MessageApp_channel_0, NULL);
+    pthread_create(&thread_id[2], NULL, MessageApp_channel_1, NULL);
     
     pthread_join(thread_id[0], NULL);
     pthread_join(thread_id[1], NULL);
+    pthread_join(thread_id[2], NULL);
     // Function for chatting between client and server
     // func(connfd);
   

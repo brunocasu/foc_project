@@ -362,13 +362,13 @@ int hash_256_bits(char* input, int input_len, unsigned char* output)
     if(ret_val<=0){printf("Error: DigestFinal returned NULL\n"); return 0;}
     
     EVP_MD_CTX_free(md_ctx);
-    printf("\nDigest is (%d): ", digestlen);
+    printf("Digest is (%d): ", digestlen);
 
     for (int k=0;k<digestlen;k++){
         output[k] = digest[k];
         printf("%02x ", (unsigned char)output[k]);
     }
-
+    printf("\n");
     free(digest);
     return digestlen;
 }
@@ -442,7 +442,7 @@ int MessageApp_handshake(int channel)
     for (int i=0;i<TempPubkey_txt_len;i++){noce_buff[i+32] = TempPubkey_txt[i];}
     for (int i=0;i<32;i++){noce_buff[i+TempPubkey_txt_len+32] = handshake_noce_R2[i];}
     
-    printf("\nR1 + TempPubk + 2 (%d): ", TempPubkey_txt_len+64);
+    printf("\nR1 + TempPubk + R2 (%d): ", TempPubkey_txt_len+64);
     for (int k=0;k<490;k++){
         printf("%02x ", (unsigned char)noce_buff[k]);
     }
@@ -470,7 +470,7 @@ int MessageApp_handshake(int channel)
     
     EVP_MD_CTX_free(md_ctx);
     EVP_PKEY_free(privkey);
-    /** BEGIN GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
+    /** END GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
     
     /** SEND TempPubkey + R2 + {R1+TempPubkey+R2}signed */
     for (int i=0;i<TempPubkey_txt_len+32;i++){buff[i] = noce_buff[i+32];}
@@ -479,7 +479,36 @@ int MessageApp_handshake(int channel)
     printf("Sending signature in Channel (%d) len (%d)\n", channel, TempPubkey_txt_len+32+sgnt_size);
     write(usr_data[channel].connfd, buff, TempPubkey_txt_len+32+sgnt_size);
     
-    /** **/
+    /** RECEIVE pre-master secret and iv encrypted by TempPubkey */
+    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
+    if (msg_size<=0){return 0;}
+        
+    /** BEGIN DECRYPT PRE MASTER SECRET AND IV USING TEMP PRIVKEY **/
+    unsigned char *secret;
+    size_t outlen;
+    // Decrypt Received Message using privkey
+    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(TempPrivkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
+    /* Determine buffer length */
+    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, buff, msg_size) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
+    
+    secret = OPENSSL_malloc(outlen);
+    if (!secret){printf("Malloc Failed for decrypted message\n"); return 0;}
+        
+    ret_val = EVP_PKEY_decrypt(ctx_p, secret, &outlen, buff, msg_size);
+    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
+    
+    EVP_PKEY_free(TempPrivkey);
+    EVP_PKEY_CTX_free(ctx_p);
+    printf("\nSESSION IV: ");
+    for (int i=0;i<12;i++){usr_data[channel].iv[i] = secret[i+96]; printf("%02x ", usr_data[channel].iv[i]);} // Save session IV
+    printf("\nSESSION KEY: ");
+    hash_256_bits(secret, outlen, usr_data[channel].key); // compute session key        
+    /** END DECRYPT PRE MASTER SECRET AND IV USING TEMP PRIVKEY **/
+    
+    
     
     
     return 1;

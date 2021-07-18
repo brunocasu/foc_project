@@ -279,6 +279,7 @@ int ClientHandshake()
     msg_size = read(sockfd, buff, MAX_BUFF);
     printf("\nHello received (%d)\n", msg_size);
     unsigned char TempPubkey_txt[426];
+    int TempPubkey_txt_len = 426;
     unsigned char handshake_cmp_buff[490]; // 32 + 426 + 32 -> {R1 + TempPubkey + R2}
     unsigned char *server_signature;
     for (int i=0;i<32;i++){handshake_cmp_buff[i] = handshake_noce_R1[i];}
@@ -330,15 +331,70 @@ int ClientHandshake()
     /** END AUTHENTICATE SERVER USING CERTIFICATE **/
     
     /** BEGIN ENCRYPT R1 + R2 + IV USING TEMP PUBKEY**/
-    // generate IV - premaster secret
+    unsigned char pre_master_secret[32];
+    RAND_poll();
+    RAND_bytes(rand_val, 32);
+    hash_256_bits(rand_val, 32, pre_master_secret);
+    RAND_poll();
+    RAND_bytes(iv, 12);
     
-    // BIO *BIO_new_mem_buf(const void *buf, int len); // Pubkey <- Pubkey_txt
+    char session_secret[108];
+    for (int i=0;i<32;i++){session_secret[i] = handshake_noce_R1[i];}
+    for (int i=0;i<32;i++){session_secret[i+32] = handshake_noce_R2[i];}
+    for (int i=0;i<32;i++){session_secret[i+64] = pre_master_secret[i];}
+    for (int i=0;i<12;i++){session_secret[i+96] = iv[i];}
     
+    EVP_PKEY* TempPubkey = EVP_PKEY_new();
+    RSA *temp_rsa = NULL;
+    BIO* pb_TempPubkey = BIO_new_mem_buf((void*) TempPubkey_txt, TempPubkey_txt_len);
+    if (pb_TempPubkey==NULL){printf("BIO_new_mem_buf returned NULL\n");}
+    
+    temp_rsa = PEM_read_bio_RSAPublicKey(pb_TempPubkey, &temp_rsa, NULL, NULL);
+    if (temp_rsa == NULL) {printf("PEM_read_bio_RSAPublicKey returned NULL\n");}
+    
+    EVP_PKEY_assign_RSA(TempPubkey, temp_rsa); // set TempPubkey to correct format from the text obtained
+    
+    unsigned char *out;
+    size_t outlen;
+    
+    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(TempPubkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_PKEY_encrypt_init(ctx_p);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_encrypt_init\n"); return 0;}
+    
+    ret_val = EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
+
+    // Determine buffer size for encrypted length
+    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, session_secret, 108) <= 0)
+    {printf("Error: EVP_PKEY_encrypt\n"); return 0;}
+    
+    out = OPENSSL_malloc(outlen);
+    if (out==NULL){printf("Malloc failed for username encryption\n"); return 0;}
+
+    // encrypt using Temporary pubkey
+    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, session_secret, 108);
+    if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
+        
+    EVP_PKEY_CTX_free(ctx_p);
+    EVP_PKEY_free(TempPubkey);
     /** END ENCRYPT R1 + R2 + IV USING TEMP PUBKEY **/
     
     /** SEND {R1 + R2 + IV}TempPubkey */
+    write(sockfd, out, outlen); // Send E{R1+R2+pre_master_secret+iv}TempPubkey
+    free(out);
     
+    /** BEGIN COMPUTE SESSION KEY **/
+    hash_256_bits(session_secret, 108, session_key);
+    printf("\nSESSION KEY: ");
+
+    for (int k=0;k<32;k++){
+        printf("%02x ", (unsigned char)session_key[k]);
+    }
+    /** END COMPUTE SESSION KEY **/
     
+    /** RECEIVE noce Encrypted with session key */
 }
 
 int ClientHandshake_old()

@@ -439,10 +439,12 @@ int ClientHandshake()
     server_secure_send(sockfd, iv, session_key, buff, sgnt_size+Username_len);
     
     // finish Handshake
-    char from_server[128];
+    char from_server[1024];
     msg_size = server_secure_receive(sockfd, iv, session_key, buff);
     for(int i=0;i<msg_size;i++){from_server[i]=buff[i];}
-    printf("\nFrom Server: %s\n", from_server);
+    printf("\nFrom Server(%d): %s\n",msg_size, from_server);
+    
+    return 1;
 }
 
 
@@ -470,7 +472,7 @@ void* sender_Task(void *vargp)
         {
             for(int i=0;i<4;i++){ipt_cmd[i] = sbuff[i];}
             if(strncmp(ipt_cmd, cmd_chat, 4)){caller=1;}
-            
+            printf("Send to Server: (%ld)", strlen(sbuff));
             server_secure_send(sockfd, iv, session_key, sbuff, strlen(sbuff));
             free(sbuff);
         }
@@ -498,12 +500,13 @@ void* receiver_Task(void *vargp)
         
         //printf("\nclient waiting...");
         msg_len = server_secure_receive(sockfd, iv, session_key, clear_text);
+        printf("From Server (%d)\n",msg_len);
         if (msg_len > 4){
             for (int i=0;i<4;i++){rec_cmd[i]=clear_text[i];} // Save received COMMAND
             for (int i=0;i<msg_len-4;i++){data[i]=clear_text[i+4];} // Save received DATA
             
             if(strncmp(rec_cmd, "reqt", 4)==0){ //received a request
-                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s>\nACCEPT?->", data);
+                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?->", data);
             }
             else if (strncmp(rec_cmd, "pubk", 4)==0){
                 if (caller==1){
@@ -511,11 +514,11 @@ void* receiver_Task(void *vargp)
                     friend_pubkey_txt = malloc(msg_len-4);
                     for(int k=0;k<msg_len-4;k++){friend_pubkey_txt[k] = data[k];}
                     // friend_begin_negotiation(); // saves the chat session key and iv
-                    // chat_with_friend_flag = 1;
+                    chat_with_friend_flag = 1;
                 }
                 else{                    
                     // friend_wait_negotiation(); // saves the chat session key and iv
-                    // chat_with_friend_flag = 1;
+                    chat_with_friend_flag = 1;
                     printf("\nMessageApp - CHAT ACCEPTED!\nMessasgeApp[CHAT]->");
                 }
             }
@@ -561,8 +564,7 @@ int main(int count, char *args[])
     sockfd = OpenConnection(hostname, portnum);
 
     if (ClientHandshake() == 1){ // From the handshake, Client gets the session_key and iv
-        printf("\nCONNECTED to MessageApp\n");
-        for(;;); // WARNING Remove this
+        
         // function for chat
         pthread_create(&rec_id, NULL, receiver_Task, NULL);
         pthread_create(&sen_id, NULL, sender_Task, NULL);

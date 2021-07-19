@@ -27,6 +27,7 @@
 #define SA struct sockaddr
 
 char* Username;
+char friendname[16];
 unsigned char iv[12];
 unsigned char session_key[32];
 int sockfd;
@@ -35,6 +36,7 @@ int chat_with_friend_flag = 0; // flag is set to one to add the chat session key
 unsigned char* friend_pubkey_txt;
 char friend_iv[12];
 char friend_session_key[32];
+pthread_mutex_t mutex_print;
 
 int hash_256_bits(unsigned char* input, int input_len, unsigned char* output);
     
@@ -439,17 +441,20 @@ int ClientHandshake()
     server_secure_send(sockfd, iv, session_key, buff, sgnt_size+Username_len);
     
     // finish Handshake
-    char from_server[128];
+    char from_server[1024];
     msg_size = server_secure_receive(sockfd, iv, session_key, buff);
     for(int i=0;i<msg_size;i++){from_server[i]=buff[i];}
-    printf("\nFrom Server: %s\n", from_server);
+    printf("\nFrom Server(%d): %s\n",msg_size, from_server);
+    
+    return 1;
 }
 
 
     
 void* sender_Task(void *vargp)
 {   
-    char *sbuff;
+    char sbuff[MAX_BUFF];
+    char friend_sbuff[MAX_BUFF];
     int len;
     char *cmd_chat ="chat";
     char *cmd_reqt ="reqt";
@@ -460,27 +465,44 @@ void* sender_Task(void *vargp)
     char *cmd_list = "list";
     char *cmd_exit ="exit";
     char ipt_cmd[4];
+
     
+        
     for (;;) {
-        sbuff = malloc(32);
             
-        printf("\nSECURE[cmd][param]->"); // send command to server
-        scanf("%65535s", sbuff);
+        //pthread_mutex_lock(&mutex_print);
+        if (chat_with_friend_flag == 0){printf("\nSERVER[cmd][param]->");}
+        else if (chat_with_friend_flag == 1){printf("\nMessasgeApp[CHAT]->");}
+         // send command to server
+        
+        fgets(sbuff, MAX_BUFF, stdin);
+        if ((strlen(sbuff) > 0) && (sbuff[strlen (sbuff) - 1] == '\n'))
+            sbuff[strlen (sbuff) - 1] = '\0';
+        
         if (chat_with_friend_flag == 0)
-        {
+        {            
             for(int i=0;i<4;i++){ipt_cmd[i] = sbuff[i];}
-            if(strncmp(ipt_cmd, cmd_chat, 4)){caller=1;}
+            if(strncmp(ipt_cmd, cmd_chat, 4)==0){caller=1;} // lock until response
             
-            server_secure_send(sockfd, iv, session_key, sbuff, strlen(sbuff));
-            free(sbuff);
+            if (strlen(sbuff)>0){
+                printf("Send to Server: (%ld)\n", strlen(sbuff));
+                server_secure_send(sockfd, iv, session_key, sbuff, strlen(sbuff));}
+            
         }
         else if (chat_with_friend_flag == 1)
         {
             //encrypted_len = friend_encrypt(encrypted_friend_msg, clear_msg, clear_msg_len);
+            for(int i=0;i<4;i++){friend_sbuff[i] = cmd_frwd[i];}
+            for(int i=0;i<strlen(sbuff);i++){friend_sbuff[i+4] = sbuff[i];}
             
-            //server_secure_send(sockfd, iv, session_key, encrypted_friend_msg, encrypted_len);
-            //free(sbuff);
+            if (strlen(friend_sbuff)>0){
+                printf("Send to Server: (%ld)\n", strlen(friend_sbuff));
+                server_secure_send(sockfd, iv, session_key, friend_sbuff, strlen(friend_sbuff));}
+            
         }
+        //pthread_mutex_unlock(&mutex_print);
+        for (int i=0;i<MAX_BUFF;i++){sbuff[i]='\0';} // clear sbuff
+        for (int i=0;i<MAX_BUFF;i++){friend_sbuff[i]='\0';} // clear friend_sbuff
     }
 }
 
@@ -491,50 +513,67 @@ void* receiver_Task(void *vargp)
     int msg_len;
     char tcp_msg[MAX_BUFF];
     char data[MAX_BUFF];
+    char onlineusrs[MAX_BUFF];
+    char clear_msg[MAX_BUFF];
+    char decrypt[MAX_BUFF];
+    int dec_size;
     char rec_cmd[4];
     unsigned char clear_text[MAX_BUFF];
+    char friend_name[16];
     
     for (;;) {
         
         //printf("\nclient waiting...");
+        
         msg_len = server_secure_receive(sockfd, iv, session_key, clear_text);
+        //pthread_mutex_lock(&mutex_print);
+        printf("From Server (%d)\n",msg_len);
         if (msg_len > 4){
             for (int i=0;i<4;i++){rec_cmd[i]=clear_text[i];} // Save received COMMAND
             for (int i=0;i<msg_len-4;i++){data[i]=clear_text[i+4];} // Save received DATA
-            
             if(strncmp(rec_cmd, "reqt", 4)==0){ //received a request
-                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s>\nACCEPT?->", data);
+                for(int i=0;i<msg_len-4;i++){friendname[i] = data[i];}
+                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?->", friendname); 
             }
             else if (strncmp(rec_cmd, "pubk", 4)==0){
                 if (caller==1){
-                    printf("\nMessageApp - CHAT ACCEPTED!\nMessasgeApp[CHAT]->");
+                    printf("\nMessageApp Caller- CHAT ACCEPTED!\n");
                     friend_pubkey_txt = malloc(msg_len-4);
                     for(int k=0;k<msg_len-4;k++){friend_pubkey_txt[k] = data[k];}
                     // friend_begin_negotiation(); // saves the chat session key and iv
-                    // chat_with_friend_flag = 1;
+                    chat_with_friend_flag = 1;
                 }
                 else{                    
                     // friend_wait_negotiation(); // saves the chat session key and iv
-                    // chat_with_friend_flag = 1;
-                    printf("\nMessageApp - CHAT ACCEPTED!\nMessasgeApp[CHAT]->");
+                    friend_pubkey_txt = malloc(msg_len-4);
+                    for(int k=0;k<msg_len-4;k++){friend_pubkey_txt[k] = data[k];}
+                    chat_with_friend_flag = 1;
+                    printf("\nMessageApp Receiver- CHAT ACCEPTED!\nMessasgeApp[CHAT]->"); 
                 }
             }
             else if (strncmp(rec_cmd, "frwd", 4)==0){
-                printf("\nMessageApp - CHAT: %s\n", data);
-                // friend_decrypt(clear_msg, data);
+                
+                // dec_size =  friend_decrypt(decrypt, data, data_len);
                 // printf(clear_msg);
+                for (int i=0;i< msg_len-4;i++){clear_msg[i]=data[i];}
+                printf("\nMessasgeApp[CHAT]->Received<%s>: %s\n", friendname, clear_msg);
+                for (int i=0;i< msg_len-4;i++){clear_msg[i]='\0';}
             }
             else if (strncmp(rec_cmd, "refu", 4)==0){
-                printf("\nMessageApp - REFUSED BY: %s\nSECURE[cmd][param]->", data);
+                printf("\nMessageApp - REFUSED BY: %s\nSERVER[cmd][param]->", data); 
             }
             else if (strncmp(rec_cmd, "list", 4)==0){
-                printf("\nMessageApp - ON LINE USERS:\n %s\nSECURE[cmd][param]->\n", data);
+                printf("\nMessageApp - ONLINE USERS:\n %s", data);
+                printf("\nSERVER[cmd][param]->");
             }
             else if (strncmp(rec_cmd, "refu", 4)==0){
-                printf("\nMessageApp - ERROR: %s\nSECURE[cmd][param]->", data);
+                printf("\nMessageApp - ERROR: %s", data);
+                printf("\nSERVER[cmd][param]->");
             }
+            else {printf("\nMessageApp - Unrecognized CMD\n");}
+            //pthread_mutex_unlock(&mutex_print);
         }
-        else if (msg_len>0){printf("Server msg too short");}
+        else if (msg_len>0){printf("Server msg too short"); }
         else {close(sockfd); exit(0);} //close connection
     }
 }
@@ -561,8 +600,7 @@ int main(int count, char *args[])
     sockfd = OpenConnection(hostname, portnum);
 
     if (ClientHandshake() == 1){ // From the handshake, Client gets the session_key and iv
-        printf("\nCONNECTED to MessageApp\n");
-        for(;;); // WARNING Remove this
+        
         // function for chat
         pthread_create(&rec_id, NULL, receiver_Task, NULL);
         pthread_create(&sen_id, NULL, sender_Task, NULL);

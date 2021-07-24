@@ -383,13 +383,224 @@ int hash_256_bits(char* input, int input_len, unsigned char* output)
         output[k] = digest[k];
         //printf("%02x ", (unsigned char)output[k]);
     }
-    printf("\n");
+
     free(digest);
     return digestlen;
 }
 
-
 int MessageApp_handshake(int channel)
+{
+    char buff[MAX_BUFF];
+    char username[16]; // provisory buff - not attached to global data
+    int username_len;
+    int msg_size;
+    char* tcp_msg;
+    int ret_val;
+    EVP_MD_CTX* md_ctx;
+    
+    unsigned char handshake_nonce_R1[32];
+    unsigned char handshake_nonce_R2[32];
+    unsigned char rand_val[32];
+    
+    /** RECEIVE R1 + Username */
+    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
+    if(msg_size<=32){printf("Hello from client Error - no username sent\n"); return 0;}
+    username_len = msg_size-32;
+    for (int i=0;i<32;i++){handshake_nonce_R1[i] = buff[i];}
+    for (int i=0;i<username_len;i++){username[i] = buff[i+32];}
+
+    /** check for potentially dangerous characters in username */
+    if (check_tainted_string(username, username_len)!=0){ printf("Usarname Contains Unsafe Charcters!\n"); return 0; }
+    
+    /** BEGIN GENERATE TEMPORARY RSA 2048 KEY PAIR **/
+    char *TempPubkey_txt;
+    int TempPubkey_txt_len;
+    
+    BIO *bp_TempPubkey = NULL;
+    BIO *bp_TempPrivkey = NULL;
+    // EVP_PKEY *TempPubkey = NULL;
+    EVP_PKEY *TempPrivkey = NULL;
+    
+    RSA *r = NULL;
+    BIGNUM *bne = NULL;
+
+    bne = BN_new();
+    ret_val = BN_set_word(bne, RSA_F4);
+    if (ret_val != 1) {printf("BN_set_word FAILED\n"); return 0;}
+
+    r = RSA_new();
+    ret_val = RSA_generate_key_ex(r, 2048, bne, NULL);
+    if (ret_val != 1) {printf("RSA_generate_key_ex FAILED\n"); return 0;} 
+
+    bp_TempPrivkey = BIO_new(BIO_s_mem());
+    ret_val = PEM_write_bio_RSAPrivateKey(bp_TempPrivkey, r, NULL, NULL, 0, NULL, NULL);
+    if (ret_val != 1) {printf("PEM_write_bio_RSAPrivateKey FAILED\n"); return 0;} 
+    
+    TempPrivkey = PEM_read_bio_PrivateKey(bp_TempPrivkey, &TempPrivkey, NULL, NULL); // Temporary PrivKey RSA 2048
+    if (TempPrivkey==NULL) {printf("PEM_read_bio_PrivateKey FAILED\n"); return 0;}
+    
+    bp_TempPubkey = BIO_new(BIO_s_mem());
+    ret_val = PEM_write_bio_RSAPublicKey(bp_TempPubkey, r);
+    if (ret_val != 1) {printf("PEM_write_bio_RSAPublicKe FAILED\n"); return 0;} // BIO Temporary PubKey RSA 2048
+    
+    TempPubkey_txt_len = BIO_pending(bp_TempPubkey);
+    TempPubkey_txt = (char*) malloc(TempPubkey_txt_len);
+    BIO_read(bp_TempPubkey, TempPubkey_txt, TempPubkey_txt_len); // TXT Temporary PubKey RSA 2048 
+    printf("Generated TEMP PUBKEY (%d): (%s)",TempPubkey_txt_len, TempPubkey_txt);
+    
+    /** END GENERATE TEMPORARY RSA 2048 KEY PAIR **/
+    
+    /** BEGIN GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
+    RAND_poll();
+    RAND_bytes(rand_val, 32);
+    hash_256_bits(rand_val, 32, handshake_nonce_R2);
+    
+    char nonce_buff[TempPubkey_txt_len+64]; // R1 + TEMP PUBKEY + R2
+    for (int i=0;i<32;i++){nonce_buff[i] = handshake_nonce_R1[i];}
+    for (int i=0;i<TempPubkey_txt_len;i++){nonce_buff[i+32] = TempPubkey_txt[i];}
+    for (int i=0;i<32;i++){nonce_buff[i+TempPubkey_txt_len+32] = handshake_nonce_R2[i];}
+    
+    FILE* privkey_file = fopen("MessageApp_key.pem", "r");
+    if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
+    EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
+    fclose(privkey_file);
+    if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
+    
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    unsigned char* sgnt_buff = (unsigned char*)malloc(EVP_PKEY_size(privkey));
+    if(sgnt_buff==NULL) {printf("Error: malloc returned NULL\n"); return 0;}
+    
+    ret_val = EVP_SignInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_SignInit returned %d\n",ret_val); return 0;}
+    ret_val = EVP_SignUpdate(md_ctx, nonce_buff, TempPubkey_txt_len+64);
+    if(ret_val == 0){printf("Error: EVP_SignUpdate returned %d\n",ret_val); return 0;}
+    unsigned int sgnt_size;
+    ret_val = EVP_SignFinal(md_ctx, sgnt_buff, &sgnt_size, privkey); // return the signed message
+    if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
+    printf("\nServer Signature size (%d)\n", sgnt_size);
+    
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(privkey);
+    /** END GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
+    /** get certificate */
+    unsigned char* cert;
+    int cert_len;
+    FILE * f = fopen ("MessageApp_cert.pem", "r");
+    if (f)
+    {
+        fseek (f, 0, SEEK_END);
+        cert_len = ftell (f);
+        fseek (f, 0, SEEK_SET);
+        cert = malloc (cert_len);
+        if (cert)
+        {
+            fread (cert, 1, cert_len, f);
+        }
+        else {printf("certificate malloc failed\n"); return 0;}
+        fclose (f);
+    }
+    else {printf("certificate file malloc failed\n"); return 0;}
+    printf ("Copied Certificate (%d)\n", cert_len);
+    
+    // build message TempPubk + R2 + {R1 + TempPubk + R2}signed + Certificate
+    for (int i=0;i<TempPubkey_txt_len;i++){buff[i] = TempPubkey_txt[i];}
+    for (int i=0;i<32;i++){buff[i+TempPubkey_txt_len] = handshake_nonce_R2[i];}
+    for (int i=0;i<256;i++){buff[i+TempPubkey_txt_len+32] = sgnt_buff[i];}
+    for (int i=0;i<cert_len;i++){buff[i+TempPubkey_txt_len+32+256] = cert[i];}
+    
+    /** SEND TempPubk + R2 + {R1 + TempPubk + R2}signed + Certificate */
+    write(usr_data[channel].connfd, buff, TempPubkey_txt_len+32+sgnt_size+cert_len);    
+    printf("Sent Temporary Pubkey and Server Signature (%d)\n", TempPubkey_txt_len+32+sgnt_size+cert_len);
+    
+    /** RECEIVE {R2 + {K}TempPubk}Signature + IV + {K}TempPubk */
+    msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
+    printf("Received User authentication and Encrypted Key (%d)\n", msg_size );
+    if(msg_size<=256+12){printf("Signature from client Error - no key sent\n"); return 0;}
+    unsigned char client_signature[256];
+    int enc_k_len = msg_size-256-12;
+    unsigned char * enc_k = malloc(enc_k_len);
+    unsigned char * cmp_buff = malloc(enc_k_len+32);
+    for (int i=0;i<32;i++){cmp_buff[i] = handshake_nonce_R2[i];}
+    for (int i=0;i<256;i++){client_signature[i] = buff[i];}
+    for (int i=0;i<enc_k_len;i++){enc_k[i] = buff[i+256+12]; cmp_buff[i+32] = buff[i+256+12];}
+    
+    /** BEGIN AUTHENTICATE USER BY PUBKEY **/
+    char *pubkey_extension = "key.pem";
+    char *filename = malloc(username_len+7);
+    if(filename==NULL){printf("filename malloc failed\n"); return 0;}
+    for (int i=0;i<username_len;i++){filename[i] = username[i];}
+    for (int i=0;i<7;i++){filename[i+username_len] = pubkey_extension[i];}
+    
+    printf("Trying to open: <%s> \n", filename);
+    FILE* clientpubkey_file = fopen(filename, "r");
+    if(clientpubkey_file==NULL)
+    {printf("USERNAME NOT REGISTERED\n"); write(usr_data[channel].connfd, "USERNAME NOT REGISTERED", 23); return 0;}
+    
+    EVP_PKEY* clientpubkey = PEM_read_PUBKEY(clientpubkey_file, NULL, NULL, NULL);
+    fclose(clientpubkey_file);
+    if(clientpubkey==NULL){printf("Error: PEM_read_PUBKEY returned NULL\n"); return 0;}
+    
+    // create the signature context:
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_VerifyInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyUpdate(md_ctx, cmp_buff, 32+enc_k_len);  
+    if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyFinal(md_ctx, client_signature, 256, clientpubkey);
+    if(ret_val==1)
+        printf("Client Authenticated! Username(%d): <%s>\n",username_len, username);
+    else{printf("Client Authentication FAILED (%d)\n", ret_val); 
+        write(usr_data[channel].connfd, "USER NOT AUTHENTICATED", 22);
+        return 0;}
+        
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(clientpubkey);
+    /** END AUTHENTICATE USER BY PUBKEY **/
+    
+    /** BEGIN DECRYPT PRE MASTER SECRET AND IV USING TEMP PRIVKEY **/
+    unsigned char *secret;
+    size_t outlen;
+    // Decrypt Received Message using privkey
+    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(TempPrivkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
+    /* Determine buffer length */
+    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, enc_k, enc_k_len) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
+    
+    secret = OPENSSL_malloc(outlen);
+    if (!secret){printf("Malloc Failed for decrypted message\n"); return 0;}
+        
+    ret_val = EVP_PKEY_decrypt(ctx_p, secret, &outlen, enc_k, enc_k_len);
+    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
+    
+    EVP_PKEY_free(TempPrivkey);
+    EVP_PKEY_CTX_free(ctx_p);
+    /** END DECRYPT PRE MASTER SECRET AND IV USING TEMP PRIVKEY **/
+    
+    for (int i=0;i<12;i++){usr_data[channel].iv[i] = buff[i+256];}
+    for (int i=0;i<32;i++){usr_data[channel].key[i] = secret[i];}
+    printf("\nCHANNEL (%d) SESSION KEY: ", channel);
+    for (int k=0;k<32;k++){
+        printf("%02x ", usr_data[channel].key[k]);
+    }
+    
+    free(secret);
+    free(enc_k);
+    free(cmp_buff);
+    printf("Finished Handshake\n");
+    for(;;);
+}
+
+
+
+
+
+int MessageApp_handshake_old(int channel)
 {
     char buff[MAX_BUFF];
     char* tcp_msg;
@@ -549,7 +760,7 @@ int MessageApp_handshake(int channel)
     for (int i=0;i<usr_data[channel].username_len;i++){usr_data[channel].username[i] = buff[i+256];}
     if (check_tainted_string(usr_data[channel].username, usr_data[channel].username_len)!=0){
         printf("Usarname Contains Unsafe Charcters!\n");
-        channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, "Usarname Contains Not Allowed Charcters!", 40);
+        channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, "Not Allowed Charcters in Username!", 40);
         return 0;}
     
     /** BEGIN AUTHENTICATE USER BY PUBKEY **/
@@ -728,13 +939,16 @@ void* MessageApp_channel_0(void *vargp)
                 printf("received list Send Ch (%d) TO Ch (%d) - (%d)\n", channel, friend_channel, 4+usr_data[channel].username_len);
             }  
             else if (strncmp("exit", rec_cmd, 4) == 0){
-                close (usr_data[channel].connfd); break;                 
+                close (usr_data[channel].connfd);
+                for (int i=0;i<16;i++){usr_data[channel].username[i] = '\0';} // remove user
+                usr_data[channel].username_len = 0;
+                break;                 
             }        
         }
         else if (client_msg_len>0){printf("Received msg Error (%d)\n",client_msg_len);}
         else {close (usr_data[channel].connfd); break;}
     }
-    // close(server_sockfd);
+
     for(;;); //close channel
 }
 
@@ -817,7 +1031,7 @@ void* MessageApp_channel_1(void *vargp)
                             for(int i=0;i<4;i++){msg_to_send[i] = cmd_pubk[i];}
                             for(int i=0;i<user_pubkey_len;i++){msg_to_send[i+4] = user_pubkey[i];}
                             channel_secure_send(friend_channel, usr_data[friend_channel].iv, usr_data[friend_channel].key, msg_to_send, 4+user_pubkey_len); // found 
-                            printf("received acpt Send Ch (%d) TO Ch (%d) - (%d)\n", channel, friend_channel, 4+usr_data[channel].username_len);
+                            printf("received acpt Send Ch (%d) TO Ch (%d) - (%d)\n", friend_channel, channel, 4+usr_data[channel].username_len);
                             // send each other the pubkey
                             user_pubkey_len = get_user_pubkey_text(usr_data[friend_channel].username, usr_data[friend_channel].username_len, user_pubkey);                            
                             for(int i=0;i<user_pubkey_len;i++){msg_to_send[i+4] = user_pubkey[i];}
@@ -862,7 +1076,10 @@ void* MessageApp_channel_1(void *vargp)
                 printf("received list Send Ch (%d) TO Ch (%d) - (%d)\n", channel, friend_channel, 4+usr_data[channel].username_len);
             }  
             else if (strncmp("exit", rec_cmd, 4) == 0){
-                close (usr_data[channel].connfd); break;                 
+                close (usr_data[channel].connfd); 
+                for (int i=0;i<16;i++){usr_data[channel].username[i] = '\0';} // remove user
+                usr_data[channel].username_len = 0;
+                break;                 
             }        
         }
         else if (client_msg_len>0){printf("Received msg Error (%d)\n",client_msg_len);}

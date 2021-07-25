@@ -40,6 +40,8 @@ unsigned char chat_counter[16] = {0};
 pthread_mutex_t mutex_print;
 EVP_PKEY* privkey;
 
+int chat_encrypt(char* encrypted_txt, char* in ,int inlen);
+int chat_decrypt(char* clear_txt, char* in, int inlen);
 int hash_256_bits(unsigned char* input, int input_len, unsigned char* output);
     
 int OpenConnection(const char *hostname, int port)
@@ -657,11 +659,11 @@ int friend_begin_negotiation()
     
     for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];} // add protcol cmd
     for (int i=0;i<256;i++) {buff[i+4] = signature[i];}
-    for (int i=0;i<12;i++) {buff[i+4+256] = iv[i];}
+    for (int i=0;i<12;i++) {buff[i+4+256] = chat_iv[i];}
     for (int i=0;i<outlen;i++) {buff[i+4+256+12] = enc_k[i];}
 
 
-    /** SEND Nonce R1 */
+    /** SEND Encrypted Key and signature */
     server_secure_send(sockfd, iv, session_key, buff, 4+256+12+outlen); // must add "frwd" cmd before string
     printf("\nSent Signature to friend (%ld)\n", 4+256+12+outlen);
     
@@ -670,8 +672,27 @@ int friend_begin_negotiation()
         printf("%02x ", chat_session_key[k]);
     }
     
+    printf("\nCHAT IV: ");
+    for (int k=0;k<12;k++){
+        printf("%02x ", chat_iv[k]);
+    }
+    
+    // receive confirmation message
+    msg_len = server_secure_receive(sockfd, iv, session_key, buff);
+    if (msg_len<4){return 0;}
+    char clear_txt[500];
+    unsigned char *msg = malloc(msg_len-4); // not considering the cmd sent
+    for (int i=0;i<msg_len-4;i++){msg[i] = buff[i+4];};
+    
+    //printf("\nReceived : ");
+    //for (int k=0;k<msg_len-4;k++){
+    //    printf("%02x ", msg[k]);
+    //}
+    
+    
+    chat_decrypt(clear_txt, msg, msg_len-4);
+    printf("\nFrom <%s>: %s\n", friendname, clear_txt);
     printf("\nFriend Key Exchange Completed\n");
-    for(;;);
     return 1;
 }
 
@@ -835,272 +856,108 @@ int friend_wait_negotiation()
         printf("%02x ", chat_session_key[k]);
     }
     
+    printf("\nCHAT IV: ");
+    for (int k=0;k<12;k++){
+        printf("%02x ", chat_iv[k]);
+    }
+    
     free(secret);
     free(enc_k);
     free(cmp_buff);
+    char enc_buff[500];
+    int enc_len = chat_encrypt(enc_buff, "CHAT IS SECURE!", 15);
+    for (int i=0;i<4;i++){buff[i] = cmd_frwd[i];}
+    for (int i=0;i<enc_len;i++){buff[i+4] = enc_buff[i];}
     
+    //printf("\nSend : ");
+    //for (int k=0;k<4+enc_len;k++){
+    //    printf("%02x ", buff[k]);
+    //}
+    //
+    server_secure_send(sockfd, iv, session_key, buff, 4+enc_len);
     printf("\nFriend Key Exchange Completed\n");
-    for(;;);
-    
-}
-
-
-
-int friend_begin_negotiation_old()
-{
-    unsigned char rand_val[32];
-    unsigned char chat_nonce_R1[32];
-    unsigned char chat_nonce_R2[32];
-    char buff[MAX_BUFF];
-    int msg_len;
-    int ret_val;
-    char *cmd_frwd = "frwd";
-    
-    printf("\nBegin Caller CHAT key exchange\n");
-    //printf("\nPubk (%ld)\n%s",strlen(friend_pubkey_txt),  friend_pubkey_txt);
-
-    RAND_poll();
-    RAND_bytes(rand_val, 32);
-    hash_256_bits(rand_val, 32, chat_nonce_R1);
-
-    //EVP_PKEY* FriendPubkey = EVP_PKEY_new();
-    //RSA *temp_rsa = NULL;
-    //BIO* pb_FriendPubkey = BIO_new_mem_buf((void*) friend_pubkey_txt, 451);
-    //if (pb_FriendPubkey==NULL){printf("BIO_new_mem_buf returned NULL\n");}
-    // RSA *PEM_read_RSAPublicKey(FILE *fp, RSA **x, pem_password_cb *cb, void *u);
-    
-    FILE* FriendPubkey_file = fopen("friendPubkey.pem", "r");
-    if(FriendPubkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
-    EVP_PKEY* FriendPubkey = PEM_read_PUBKEY(FriendPubkey_file, NULL, NULL, NULL);
-    fclose(FriendPubkey_file);
-    if(FriendPubkey==NULL){printf("Error: PEM_read_PUBKEY returned NULL\n"); return 0; }
-    
-    //temp_rsa = PEM_read_RSA_PUBKEY(pb_FriendPubkey, &temp_rsa, NULL, NULL);
-    //if (temp_rsa == NULL) {printf("PEM_read_RSA_PUBKEY returned NULL\n"); return 0;}
-    
-    //EVP_PKEY_assign_RSA(FriendPubkey, temp_rsa); // set TempPubkey to correct format from the text obtained
-    
-    unsigned char *out;
-    size_t outlen;
-    
-    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(FriendPubkey, NULL);
-    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
-    
-    ret_val = EVP_PKEY_encrypt_init(ctx_p);
-    if(ret_val <= 0){printf("Error: EVP_PKEY_encrypt_init\n"); return 0;}
-    
-    ret_val = EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING);
-    if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
-
-    // Determine buffer size for encrypted length
-    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, chat_nonce_R1, 32) <= 0)
-    {printf("Error: EVP_PKEY_encrypt\n"); return 0;}
-    
-    out = OPENSSL_malloc(outlen);
-    if (out==NULL){printf("Malloc failed for username encryption\n"); return 0;}
-
-    // encrypt using Temporary pubkey
-    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, chat_nonce_R1, 32);
-    if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
-        
-    EVP_PKEY_CTX_free(ctx_p);
-    EVP_PKEY_free(FriendPubkey);
-    
-    /** SEND {R1} encrypted with friend PubKey*/
-    sleep(2);
-    printf("\nSend Nonce 1 key exchange\n");
-    for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];}
-    for(int i=0;i<outlen;i++){buff[i+4]=out[i];}
-    server_secure_send(sockfd, iv, session_key, buff, outlen+4); // must add "frwd" cmd before string
-    free(out);
-    
-    /** RECEIVE encrypted {R1+R2+IV}MyPubkey from friend **/
-    
-    msg_len = server_secure_receive(sockfd, iv, session_key, buff);
-    printf("\nReceived Friend Signature\n");
-    /** DECRYPT AND COMPUTE CHAT SESSION KEY **/
-    unsigned char *secret;
-    // Decrypt Received Message using privkey
-    //FILE* privkey_file = fopen("privkey.pem", "r");
-    //if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
-    //EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
-    //fclose(privkey_file);
-    //if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
-    
-    ctx_p = EVP_PKEY_CTX_new(privkey, NULL);
-    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
-    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
-    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
-    /* Determine buffer length */
-    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, buff, msg_len) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
-    
-    secret = OPENSSL_malloc(outlen);
-    if (!secret){printf("Malloc Failed for decrypted message\n"); return 0;}
-        
-    ret_val = EVP_PKEY_decrypt(ctx_p, secret, &outlen, buff, msg_len);
-    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
-
-    for (int i=0;i<12;i++){chat_iv[i] = secret[i+64];} // Save session IV
-    hash_256_bits(secret, outlen, chat_session_key); // compute session key
-    printf("\nCHAT SESSION KEY: ");
-    for (int k=0;k<32;k++){
-        printf("%02x ", chat_session_key[k]);
-    }
-    free(secret);
-    EVP_PKEY_free(privkey);
-    EVP_PKEY_CTX_free(ctx_p);
-    
-    printf("\nFinished CHAT Key exchange\n");
     return 1;
-}    
-
-
-int friend_wait_negotiation_old()
-{
-    unsigned char rand_val[32];
-    unsigned char* chat_nonce_R1;
-    unsigned char chat_nonce_R2[32];
-    unsigned char secret[76];
-    char buff[MAX_BUFF];
-    int msg_len;
-    int ret_val;
-    size_t outlen;
-    char *cmd_frwd = "frwd";
     
-    /** RECEIVE {R1}MyPubkey from friend **/
-    printf("\nBegin Receiver CHAT key exchange\n");
-    msg_len = server_secure_receive(sockfd, iv, session_key, buff);
-    printf("\nReceived Nonce 1 key exchange\n");
-    /** DECRYPT R1 USING Privkey **/
-    //FILE* privkey_file = fopen("privkey.pem", "r");
-    //if(privkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
-    //EVP_PKEY* privkey = PEM_read_PrivateKey(privkey_file, NULL, NULL, NULL);
-    //fclose(privkey_file);
-    //if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
-    
-    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(privkey, NULL);
-    if (ctx_p==NULL){printf("Error:privkey - EVP_PKEY_CTX_new returned NULL\n"); return 0;}
-    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
-    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
-    /* Determine buffer length */
-    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, buff, msg_len) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
-    if (outlen!=32){printf("nonce R1 sent has the wrong size\n"); return 0;}
-    
-    chat_nonce_R1 = OPENSSL_malloc(outlen);
-    if (!chat_nonce_R1){printf("Malloc Failed for decrypted message\n"); return 0;}
-        
-    ret_val = EVP_PKEY_decrypt(ctx_p, chat_nonce_R1, &outlen, buff, msg_len);
-    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
-    
-    RAND_poll();
-    RAND_bytes(chat_iv, 12);
-    RAND_poll();
-    RAND_bytes(chat_iv, 32);
-    hash_256_bits(rand_val, 32, chat_nonce_R2);
-    for (int i=0;i<32;i++){secret[i] = chat_nonce_R1[i];} // Save R1
-    for (int i=0;i<32;i++){secret[i+32] = chat_nonce_R2[i];} // Save R1
-    for (int i=0;i<12;i++){secret[i+64] = chat_iv[i];} // Save R1
-    
-    EVP_PKEY_free(privkey);
-    EVP_PKEY_CTX_free(ctx_p);
-    
-    /** ENCRYPT {R1+R2+IV} USING Friend Pubkey **/
-    //EVP_PKEY* FriendPubkey = EVP_PKEY_new();
-    //RSA *temp_rsa = NULL;
-    //BIO* pb_FriendPubkey = BIO_new_mem_buf((void*) friend_pubkey_txt, 451);
-    //if (pb_FriendPubkey==NULL){printf("BIO_new_mem_buf returned NULL\n");}
-    //
-    //temp_rsa = PEM_read_RSA_PUBKEY(pb_FriendPubkey, &temp_rsa, NULL, NULL);
-    //if (temp_rsa == NULL) {printf("PEM_read_RSA_PUBKEY returned NULL\n");}
-    //
-    //EVP_PKEY_assign_RSA(FriendPubkey, temp_rsa); // set TempPubkey to correct format from the text obtained
-    FILE* FriendPubkey_file = fopen("friendPubkey.pem", "r");
-    if(FriendPubkey_file==NULL){printf("Privkey File Open Error\n"); return 0;}
-    EVP_PKEY* FriendPubkey = PEM_read_PUBKEY(FriendPubkey_file, NULL, NULL, NULL);
-    fclose(FriendPubkey_file);
-    if(FriendPubkey==NULL){printf("Error: PEM_read_PUBKEY returned NULL\n"); return 0; }
-    
-    unsigned char *out;
-    
-    ctx_p = EVP_PKEY_CTX_new(FriendPubkey, NULL);
-    if (ctx_p==NULL){printf("Error:FriendPubkey - EVP_PKEY_CTX_new returned NULL\n"); return 0;}
-    
-    ret_val = EVP_PKEY_encrypt_init(ctx_p);
-    if(ret_val <= 0){printf("Error: EVP_PKEY_encrypt_init\n"); return 0;}
-    
-    ret_val = EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING);
-    if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
-
-    // Determine buffer size for encrypted length
-    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, secret, 76) <= 0)
-    {printf("Error: EVP_PKEY_encrypt\n"); return 0;}
-    
-    out = OPENSSL_malloc(outlen);
-    if (out==NULL){printf("Malloc failed for username encryption\n"); return 0;}
-
-    // encrypt using Temporary pubkey
-    ret_val = EVP_PKEY_encrypt(ctx_p, out, &outlen, secret, 76);
-    if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
-        
-    EVP_PKEY_CTX_free(ctx_p);
-    EVP_PKEY_free(FriendPubkey);
-    
-    /** SEND {R1+R2+IV} encrypted with friend PubKey */
-    printf("\nSend Nonce 2 key exchange\n");
-    for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];}
-    for(int i=0;i<outlen;i++){buff[i+4]=out[i];}
-    server_secure_send(sockfd, iv, session_key, buff, outlen+4);
-    free(out);
-      
-    hash_256_bits(secret, outlen, chat_session_key); // compute session key
-    printf("\nCHAT SESSION KEY: ");
-    for (int k=0;k<32;k++){
-        printf("%02x ", chat_session_key[k]);}
-        
-    printf("\nFinished CHAT Key exchange\n");
-    return 1;        
 }
+
 
 
 int chat_encrypt(char* encrypted_txt, char* in ,int inlen)
 {
-    RAND_poll();
     unsigned char out[MAX_BUFF];
-    unsigned char aad[16];
-    RAND_bytes(aad, 16);
+    unsigned char aad[28];
     unsigned char tag[16];
-
-    int outlen = EncryptAES_256_GCM(out, in, inlen, aad, 16, chat_iv, chat_session_key, tag);    
-    if (outlen<=0){printf("Error: EncryptAES_256_GCM\n"); return 0;}
+    int carry = 0;
     
-    for (int v=0;v<16;v++)
+    for (int i=0;i<12;i++){aad[i] = chat_iv[i];}
+    for (int i=0;i<16;i++){aad[i+12] = chat_counter[i];}
+
+    // increment 16 byte counter
+    chat_counter[0] = chat_counter[0]+1; 
+    if (chat_counter[0]==0){carry=1;}
+    for (int n=0;n<15;n++){    
+        if (chat_counter[n]==0 && carry==1){
+            chat_counter[n+1] = chat_counter[n+1]+1;
+            if (chat_counter[n+1]==0)
+                carry=1;
+            else
+                carry=0;
+        }
+    }
+
+    int outlen = EncryptAES_256_GCM(out, in, inlen, aad, 28, chat_iv, chat_session_key, tag);    
+    if (outlen<=0){printf("Error: Chat EncryptAES_256_GCM\n"); return 0;}
+    
+    for (int v=0;v<28;v++)
         encrypted_txt[v] = aad[v];
     for (int v=0;v<16;v++)
-        encrypted_txt[v+16] = tag[v];
+        encrypted_txt[v+28] = tag[v];
     for (int v=0;v<outlen;v++)
-        encrypted_txt[v+32] = out[v];
+        encrypted_txt[v+44] = out[v];
     
-    return (outlen+16+16);
+    return (outlen+12+16+16);
 }
+
     
 int chat_decrypt(char* clear_txt, char* in, int inlen)
 {
-    unsigned char rec_aad[16];
+    unsigned char rec_iv[12];
+    unsigned char rec_counter[16];
+    unsigned char rec_aad[28];
     unsigned char rec_tag[16];
     unsigned char* encrypted_data;
+    int carry = 0;
     
-    if ((inlen>32)&&(inlen<MAX_BUFF))
+    if ((inlen>44)&&(inlen<MAX_BUFF))
     {
-        encrypted_data = malloc(inlen-32);
-        for(int i=0;i<16;i++){rec_aad[i] = in[i];}
-        for(int i=0;i<16;i++){rec_tag[i] = in[i+16];}
-        for(int i=0;i<inlen-32;i++){encrypted_data[i]=in[i+32];}            
+        encrypted_data = malloc(inlen-44);
+        for(int i=0;i<12;i++){rec_iv[i] = in[i];}
+        for(int i=0;i<16;i++){rec_counter[i] = in[i+12];}
+        for(int i=0;i<28;i++){rec_aad[i] = in[i];}
+        for(int i=0;i<16;i++){rec_tag[i] = in[i+28];}
+        for(int i=0;i<inlen-44;i++){encrypted_data[i]=in[i+44];}            
     }
-    else { return 0;}
+    else {return 0;}
+
+    if(strncmp(chat_iv, rec_iv, 12)!=0){printf("\nAES Decryption Chat FAILED - wrong IV\n"); return 0;}
+    if(strncmp(chat_counter, rec_counter, 16)!=0){printf("\nAES Decryption Chat FAILED - wrong counter value\n"); return 0;}
+    
+    // increment 16 byte counter
+    chat_counter[0] = chat_counter[0]+1; 
+    if (chat_counter[0]==0){carry=1;}
+    for (int n=0;n<15;n++){    
+        if (chat_counter[n]==0 && carry==1){
+            chat_counter[n+1] = chat_counter[n+1]+1;
+            if (chat_counter[n+1]==0)
+                carry=1;
+            else
+                carry=0;
+        }
+    }
     
     unsigned char decrypt_buff[MAX_BUFF];
-    int clear_len = DecryptAES_256_GCM(decrypt_buff, encrypted_data, inlen-32, rec_aad, 16, chat_iv, chat_session_key, rec_tag);
-    if (clear_len<0){printf("AES DECRYPTION FAILED\n"); return 0;}
+    int clear_len = DecryptAES_256_GCM(decrypt_buff, encrypted_data, inlen-44, rec_aad, 28, chat_iv, chat_session_key, rec_tag);
+    if (clear_len<0){printf("Chat AES DECRYPTION FAILED\n"); return 0;}
 
     for (int i=0;i<clear_len;i++)
         clear_txt[i] = decrypt_buff[i];
@@ -1144,7 +1001,10 @@ void* sender_Task(void *vargp)
         if (chat_with_friend_flag == 0)
         {            
             for(int i=0;i<4;i++){ipt_cmd[i] = sbuff[i];}
-            if(strncmp(ipt_cmd, cmd_chat, 4)==0){caller=1;} // lock until response
+            if(strncmp(ipt_cmd, cmd_chat, 4)==0){
+                caller=1;
+                for (int i=0;i<strlen(sbuff)-4;i++){friendname[i] = sbuff[i+4];}
+            } // lock until response
             
             if (strlen(sbuff)>0){
                 printf("Send to Server: (%ld)\n", strlen(sbuff));
@@ -1155,8 +1015,9 @@ void* sender_Task(void *vargp)
         {
             for(int i=0;i<5;i++){ipt_cmd_chat[i] = sbuff[i];}
             if(strncmp(ipt_cmd_chat, "/exit", 5)==0){
-                server_secure_send(sockfd, iv, session_key, "exitx", 5);
-                close(sockfd); exit(0);
+                chat_with_friend_flag = 0; //exit chat
+                //server_secure_send(sockfd, iv, session_key, "exitx", 5);
+                //close(sockfd); exit(0);
             }
             if (strlen(friend_sbuff)>0){
                 outlen = chat_encrypt(enc_buff, sbuff , strlen(sbuff));
@@ -1239,7 +1100,7 @@ void* receiver_Task(void *vargp)
                     else {printf("\nChat Key exchange failed"); }
                 }
             }
-            else if (strncmp(rec_cmd, "frwd", 4)==0){
+            else if ((strncmp(rec_cmd, "frwd", 4)==0)&&(chat_with_friend_flag == 1)){
                 clear_len = chat_decrypt(clear_txt, data, msg_len-4);                
                 printf("\nMessasgeApp[CHAT]->Received<%s>: %s\n", friendname, clear_txt);
                 for (int i=0;i< clear_len;i++){clear_txt[i]='\0';}

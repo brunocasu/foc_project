@@ -1060,7 +1060,7 @@ void* receiver_Task(void *vargp)
         
         msg_len = server_secure_receive(sockfd, iv, session_key, buff);
         //pthread_mutex_lock(&mutex_print);
-        // printf("From Server (%d)\n",msg_len);
+        printf("From Server (%d)\n",msg_len);
         if (msg_len > 4){
             for (int i=0;i<4;i++){rec_cmd[i]=buff[i];} // Save received COMMAND
             for (int i=0;i<msg_len-4;i++){data[i]=buff[i+4];} // Save received DATA

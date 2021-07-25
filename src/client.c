@@ -989,8 +989,8 @@ void* sender_Task(void *vargp)
     for (;;) {
             
         //pthread_mutex_lock(&mutex_print);
-        if (chat_with_friend_flag == 0){printf("\nMessasgeApp[SERVER-COMMAND]->");}
-        else if (chat_with_friend_flag == 1){printf("\nMessasgeApp[CHAT]->");}
+        if (chat_with_friend_flag == 0){printf("\nMessasgeApp[SERVER-COMMAND]->\n");}
+        else if (chat_with_friend_flag == 1){printf("\nMessasgeApp[CHAT]->\n");}
          // send command to server
         
         fgets(sbuff, MAX_BUFF, stdin);
@@ -1060,13 +1060,13 @@ void* receiver_Task(void *vargp)
         
         msg_len = server_secure_receive(sockfd, iv, session_key, buff);
         //pthread_mutex_lock(&mutex_print);
-        printf("From Server (%d)\n",msg_len);
+        //printf("From Server (%d)\n",msg_len);
         if (msg_len > 4){
             for (int i=0;i<4;i++){rec_cmd[i]=buff[i];} // Save received COMMAND
             for (int i=0;i<msg_len-4;i++){data[i]=buff[i+4];} // Save received DATA
             if(strncmp(rec_cmd, "reqt", 4)==0){ //received a request
                 for(int i=0;i<msg_len-4;i++){friendname[i] = data[i];}
-                printf("MessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?->", friendname); 
+                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?\n", friendname); 
             }
             else if (strncmp(rec_cmd, "pubk", 4)==0){
                 if (caller==1){
@@ -1102,7 +1102,7 @@ void* receiver_Task(void *vargp)
             }
             else if ((strncmp(rec_cmd, "frwd", 4)==0)&&(chat_with_friend_flag == 1)){
                 clear_len = chat_decrypt(clear_txt, data, msg_len-4);                
-                printf("\nMessasgeApp[CHAT]<%s>: %s", friendname, clear_txt);
+                printf("\nMessasgeApp[CHAT]<%s>: %s\n", friendname, clear_txt);
                 for (int i=0;i< clear_len;i++){clear_txt[i]='\0';}
             }
             else if (strncmp(rec_cmd, "refu", 4)==0){

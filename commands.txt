@@ -1,9 +1,7 @@
 A. build programs from C file
 
 gcc -o server  server.c -lssl -lcrypto -lpthread
-gcc -o client  client_a.c -lssl -lcrypto -lpthread
-gcc -o client  client_b.c -lssl -lcrypto -lpthread
-
+gcc -o client  client.c -lssl -lcrypto -lpthread
 
 1. generate private and public keys with password  for users
 

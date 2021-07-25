@@ -34,8 +34,8 @@ unsigned char session_counter[16] = {0};
 int sockfd;
 int caller=0; // caller is 1 if you is the one who started the chat
 int chat_with_friend_flag = 0; // flag is set to one to add the chat session key in the encryption
-char chat_iv[12];
-char chat_session_key[32];
+unsigned char chat_iv[12];
+unsigned char chat_session_key[32];
 unsigned char chat_counter[16] = {0};
 pthread_mutex_t mutex_print;
 EVP_PKEY* privkey;
@@ -530,8 +530,323 @@ int ClientHandshake()
 
 
 
-
 int friend_begin_negotiation()
+{
+    unsigned char rand_val[32];
+    unsigned char chat_nonce_R1[32];
+    unsigned char chat_nonce_R2[32];
+    EVP_MD_CTX* md_ctx;
+    char buff[MAX_BUFF];
+    int msg_len;
+    int ret_val;
+    char *cmd_frwd = "frwd";
+    
+    printf("\nBegin Negotiation\n");
+    
+    RAND_poll();
+    RAND_bytes(rand_val, 32);
+    hash_256_bits(rand_val, 32, chat_nonce_R1);
+    
+    for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];}
+    for(int i=0;i<32;i++){buff[i+4]=chat_nonce_R1[i];}
+    /** SEND Nonce R1 */
+    server_secure_send(sockfd, iv, session_key, buff, 36); // must add "frwd" cmd before string
+    printf("Sent R1\n");
+    
+    /** RECEIVE TempPubk + R2 + {R1+TempPubk+R2}Signed */
+    msg_len = server_secure_receive(sockfd, iv, session_key, buff);
+    printf("Received Friend Signature\n");
+    char rec_cmd[4];
+    for (int i=0;i<4;i++){rec_cmd[i] = buff[i];}
+    if (strncmp(cmd_frwd, rec_cmd, 4)!=0){printf("Message Command ERROR\n"); return 0;}
+    
+    if(msg_len<4+426+32+256){printf("Signature size from friend ERROR\n"); return 0;}
+    char friend_authentication_str[490]; // R1+TempPubkey+R2 -> 32+426+32 
+    for (int i=0;i<32;i++){friend_authentication_str[i]=chat_nonce_R1[i];}
+    char TempPubkey_txt[426]; 
+    int TempPubkey_txt_len=426;
+    for (int i=0;i<426;i++){friend_authentication_str[i+32]=buff[i+4]; TempPubkey_txt[i] = buff[i+4];} // first 4 bytes from buff are protocol control
+    for (int i=0;i<32;i++){friend_authentication_str[i+32+426]=buff[i+4+426]; chat_nonce_R2[i]=buff[i+4+426];}
+    char friend_signature[256];
+    for (int i=0;i<256;i++){friend_signature[i]=buff[i+4+426+32];}
+    
+    /** BEGIN AUTHENTICATE FRIEND BY PUBKEY */
+    FILE* clientpubkey_file = fopen("friendPubkey.pem", "r");
+    if(clientpubkey_file==NULL)
+    {printf("Fail to Open Pubkey File\n"); return 0;}
+    
+    EVP_PKEY* friend_pubkey = PEM_read_PUBKEY(clientpubkey_file, NULL, NULL, NULL);
+    fclose(clientpubkey_file);
+    if(friend_pubkey==NULL){printf("Error: PEM_read_PUBKEY returned NULL\n"); return 0;}
+    
+    // create the signature context:
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_VerifyInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyUpdate(md_ctx, friend_authentication_str, 490);  
+    if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyFinal(md_ctx, friend_signature, 256, friend_pubkey);
+    if(ret_val==1)
+        printf("Friend Authenticated! \n");
+    else{printf("Friend Authentication FAILED (%d)\n", ret_val); return 0;}
+    /** END AUTHENTICATE FRIEND BY PUBKEY */
+    
+    RAND_poll();
+    RAND_bytes(rand_val, 32);
+    hash_256_bits(rand_val, 32, chat_session_key);
+    RAND_poll();
+    RAND_bytes(chat_iv, 12);
+    
+    /** BEGIN ENCRYPT CHAT SESSION KEY BY TEMPORARY PUBKEY */
+    EVP_PKEY* TempPubkey = EVP_PKEY_new();
+    RSA *temp_rsa = NULL;
+    BIO* pb_TempPubkey = BIO_new_mem_buf((void*) TempPubkey_txt, TempPubkey_txt_len);
+    if (pb_TempPubkey==NULL){printf("BIO_new_mem_buf returned NULL\n");}
+    printf("TEMP PUBKEY (%d): %s\n",TempPubkey_txt_len, TempPubkey_txt);
+    temp_rsa = PEM_read_bio_RSAPublicKey(pb_TempPubkey, &temp_rsa, NULL, NULL);
+    if (temp_rsa == NULL) {printf("PEM_read_bio_RSAPublicKey returned NULL\n"); return 0;}
+    
+    EVP_PKEY_assign_RSA(TempPubkey, temp_rsa); // set TempPubkey to correct format
+    
+    unsigned char *enc_k; // encrypted Session Key 'K' with Temporary Public Key
+    size_t outlen;
+    
+    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(TempPubkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    ret_val = EVP_PKEY_encrypt_init(ctx_p);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_encrypt_init\n"); return 0;}
+    ret_val = EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING);
+    if(ret_val <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding\n"); return 0;}
+    // Determine buffer size for encrypted length
+    if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, chat_session_key, 32) <= 0)
+    {printf("Error: EVP_PKEY_encrypt\n"); return 0;}
+    
+    enc_k = OPENSSL_malloc(outlen);
+    if (enc_k==NULL){printf("Malloc failed for username encryption\n"); return 0;}
+
+    ret_val = EVP_PKEY_encrypt(ctx_p, enc_k, &outlen, chat_session_key, 32);
+    if (ret_val<=0){printf("ENCRYPTION Error: EVP_PKEY_encrypt\n"); return 0;}
+        
+    EVP_PKEY_CTX_free(ctx_p);
+    EVP_PKEY_free(TempPubkey);
+    
+    /** sign R2 + encrypted session key using privkey */
+    char *sign_buff = malloc(32+outlen);
+    if (sign_buff==NULL){printf("Malloc failed for username encryption\n"); return 0;}
+    for (int i=0;i<32;i++){sign_buff[i]=chat_nonce_R2[i];}
+    for (int i=0;i<outlen;i++){sign_buff[i+32]=enc_k[i];}
+    
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    unsigned char* signature = (unsigned char*)malloc(EVP_PKEY_size(privkey));
+    if(signature==NULL) {printf("Error: malloc returned NULL\n"); return 0;}
+    
+    ret_val = EVP_SignInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_SignInit returned %d\n",ret_val); return 0;}
+    ret_val = EVP_SignUpdate(md_ctx, sign_buff, 32+outlen);
+    if(ret_val == 0){printf("Error: EVP_SignUpdate returned %d\n",ret_val); return 0;}
+    unsigned int sign_size;
+    ret_val = EVP_SignFinal(md_ctx, signature, &sign_size, privkey); // return the signed message
+    if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
+
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(privkey);
+    
+    for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];} // add protcol cmd
+    for (int i=0;i<256;i++) {buff[i+4] = signature[i];}
+    for (int i=0;i<12;i++) {buff[i+4+256] = iv[i];}
+    for (int i=0;i<outlen;i++) {buff[i+4+256+12] = enc_k[i];}
+
+
+    /** SEND Nonce R1 */
+    server_secure_send(sockfd, iv, session_key, buff, 4+256+12+outlen); // must add "frwd" cmd before string
+    printf("\nSent Signature to friend (%ld)\n", 4+256+12+outlen);
+    
+    printf("\nCHAT SESSION KEY: ");
+    for (int k=0;k<32;k++){
+        printf("%02x ", chat_session_key[k]);
+    }
+    
+    printf("\nFriend Key Exchange Completed\n");
+    for(;;);
+    return 1;
+}
+
+
+int friend_wait_negotiation()
+{
+    unsigned char rand_val[32];
+    unsigned char chat_nonce_R1[32];
+    unsigned char chat_nonce_R2[32];
+    EVP_MD_CTX* md_ctx;
+    char buff[MAX_BUFF];
+    int msg_len;
+    int ret_val;
+    char *cmd_frwd = "frwd";
+    
+    /** RECEIVE R1 */
+    printf("Waiting for Caller Negotiation...\n");
+    msg_len = server_secure_receive(sockfd, iv, session_key, buff);
+    printf("Received R1(%d)\n", msg_len);
+    char rec_cmd[4];
+    for (int i=0;i<4;i++){rec_cmd[i] = buff[i];}
+    if (strncmp(cmd_frwd, rec_cmd, 4)!=0){printf("Message Command ERROR\n"); return 0;}
+    for (int i=0;i<32;i++){chat_nonce_R1[i] = buff[i+4];}
+    
+    /** BEGIN GENERATE TEMPORARY RSA 2048 KEY PAIR **/
+    char *TempPubkey_txt;
+    int TempPubkey_txt_len;
+    
+    BIO *bp_TempPubkey = NULL;
+    BIO *bp_TempPrivkey = NULL;
+    // EVP_PKEY *TempPubkey = NULL;
+    EVP_PKEY *TempPrivkey = NULL;
+    
+    RSA *r = NULL;
+    BIGNUM *bne = NULL;
+
+    bne = BN_new();
+    ret_val = BN_set_word(bne, RSA_F4);
+    if (ret_val != 1) {printf("BN_set_word FAILED\n"); return 0;}
+
+    r = RSA_new();
+    ret_val = RSA_generate_key_ex(r, 2048, bne, NULL);
+    if (ret_val != 1) {printf("RSA_generate_key_ex FAILED\n"); return 0;} 
+
+    bp_TempPrivkey = BIO_new(BIO_s_mem());
+    ret_val = PEM_write_bio_RSAPrivateKey(bp_TempPrivkey, r, NULL, NULL, 0, NULL, NULL);
+    if (ret_val != 1) {printf("PEM_write_bio_RSAPrivateKey FAILED\n"); return 0;} 
+    
+    TempPrivkey = PEM_read_bio_PrivateKey(bp_TempPrivkey, &TempPrivkey, NULL, NULL); // Temporary PrivKey RSA 2048
+    if (TempPrivkey==NULL) {printf("PEM_read_bio_PrivateKey FAILED\n"); return 0;}
+    
+    bp_TempPubkey = BIO_new(BIO_s_mem());
+    ret_val = PEM_write_bio_RSAPublicKey(bp_TempPubkey, r);
+    if (ret_val != 1) {printf("PEM_write_bio_RSAPublicKe FAILED\n"); return 0;} // BIO Temporary PubKey RSA 2048
+    
+    TempPubkey_txt_len = BIO_pending(bp_TempPubkey);
+    TempPubkey_txt = (char*) malloc(TempPubkey_txt_len);
+    BIO_read(bp_TempPubkey, TempPubkey_txt, TempPubkey_txt_len); // TXT Temporary PubKey RSA 2048 
+    printf("Generated TEMP PUBKEY (%d): %s\n",TempPubkey_txt_len, TempPubkey_txt);    
+    /** END GENERATE TEMPORARY RSA 2048 KEY PAIR **/
+    
+    /** BEGIN GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
+    RAND_poll();
+    RAND_bytes(rand_val, 32);
+    hash_256_bits(rand_val, 32, chat_nonce_R2);
+    
+    char nonce_buff[TempPubkey_txt_len+64]; // R1 + TEMP PUBKEY + R2
+    for (int i=0;i<32;i++){nonce_buff[i] = chat_nonce_R1[i];}
+    for (int i=0;i<TempPubkey_txt_len;i++){nonce_buff[i+32] = TempPubkey_txt[i];}
+    for (int i=0;i<32;i++){nonce_buff[i+TempPubkey_txt_len+32] = chat_nonce_R2[i];}
+    
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    unsigned char* sgnt_buff = (unsigned char*)malloc(EVP_PKEY_size(privkey));
+    if(sgnt_buff==NULL) {printf("Error: malloc returned NULL\n"); return 0;}
+    
+    ret_val = EVP_SignInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_SignInit returned %d\n",ret_val); return 0;}
+    ret_val = EVP_SignUpdate(md_ctx, nonce_buff, TempPubkey_txt_len+64);
+    if(ret_val == 0){printf("Error: EVP_SignUpdate returned %d\n",ret_val); return 0;}
+    unsigned int sgnt_size;
+    ret_val = EVP_SignFinal(md_ctx, sgnt_buff, &sgnt_size, privkey); // return the signed message
+    if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
+    
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(privkey);
+    /** END GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
+    
+    // build message TempPubk + R2 + {R1+TempPubk+R2}signed
+    for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];} // add protcol cmd
+    for (int i=0;i<TempPubkey_txt_len;i++){buff[i+4] = TempPubkey_txt[i];}
+    for (int i=0;i<32;i++){buff[i+4+TempPubkey_txt_len] = chat_nonce_R2[i];}
+    for (int i=0;i<256;i++){buff[i+4+TempPubkey_txt_len+32] = sgnt_buff[i];}
+
+    server_secure_send(sockfd, iv, session_key, buff, 4+TempPubkey_txt_len+32+sgnt_size);
+    printf("Sent Signature\n");
+    
+    msg_len = server_secure_receive(sockfd, iv, session_key, buff);
+    printf("Received Friend Signature(%d)\n", msg_len);
+    for (int i=0;i<4;i++){rec_cmd[i] = buff[i];}
+    if (strncmp(cmd_frwd, rec_cmd, 4)!=0){printf("Sign Message Command ERROR\n"); return 0;}
+    
+    unsigned char friend_signature[256];
+    int enc_k_len = msg_len-4-256-12;
+    unsigned char * enc_k = malloc(enc_k_len);
+    unsigned char * cmp_buff = malloc(enc_k_len+32);
+    for (int i=0;i<32;i++){cmp_buff[i] = chat_nonce_R2[i];}
+    for (int i=0;i<256;i++){friend_signature[i] = buff[i+4];}
+    for (int i=0;i<enc_k_len;i++){enc_k[i] = buff[i+4+256+12]; cmp_buff[i+32] = buff[i+4+256+12];}
+    
+    /** BEGIN AUTHENTICATE FRIEND BY PUBKEY **/
+    FILE* clientpubkey_file = fopen("friendPubkey.pem", "r");
+    if(clientpubkey_file==NULL){printf("Fail to Open Frien Pubkey\n"); return 0;}
+    
+    EVP_PKEY* friend_pubkey = PEM_read_PUBKEY(clientpubkey_file, NULL, NULL, NULL);
+    fclose(clientpubkey_file);
+    if(friend_pubkey==NULL){printf("Error: PEM_read_PUBKEY returned NULL\n"); return 0;}
+    
+    // create the signature context:
+    md_ctx = EVP_MD_CTX_new();
+    if(md_ctx==NULL){printf("Error: EVP_MD_CTX_new returned NULL\n"); return 0;}
+    
+    ret_val = EVP_VerifyInit(md_ctx, EVP_sha256());
+    if(ret_val == 0){printf("Error: EVP_VerifyInit returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyUpdate(md_ctx, cmp_buff, 32+enc_k_len);  
+    if(ret_val == 0){printf("Error: EVP_VerifyUpdate returned NULL\n"); return 0;}
+    ret_val = EVP_VerifyFinal(md_ctx, friend_signature, 256, friend_pubkey);
+    if(ret_val==1)
+        printf("Friend Authenticated!\n");
+    else{printf("Friend Authentication FAILED (%d)\n", ret_val); return 0;}
+        
+    EVP_PKEY_free(friend_pubkey);
+    /** END AUTHENTICATE USER BY PUBKEY **/
+    
+    /** BEGIN DECRYPT Session KEY using TEMP PRIVKEY **/
+    unsigned char *secret;
+    size_t outlen;
+    // Decrypt Received Message using privkey
+    EVP_PKEY_CTX* ctx_p = EVP_PKEY_CTX_new(TempPrivkey, NULL);
+    if (ctx_p==NULL){printf("Error: EVP_PKEY_CTX_new returned NULL\n"); return 0;}
+    if (EVP_PKEY_decrypt_init(ctx_p) <= 0){printf("Error: EVP_PKEY_decrypt_init returned NULL\n"); return 0;}
+    if (EVP_PKEY_CTX_set_rsa_padding(ctx_p, RSA_PKCS1_OAEP_PADDING) <= 0){printf("Error: EVP_PKEY_CTX_set_rsa_padding returned NULL\n"); return 0;}
+    /* Determine buffer length */
+    if (EVP_PKEY_decrypt(ctx_p, NULL, &outlen, enc_k, enc_k_len) <= 0){printf("Error: EVP_PKEY_decrypt returned NULL\n"); return 0;}
+    
+    secret = OPENSSL_malloc(outlen);
+    if (!secret){printf("Malloc Failed for decrypted message\n"); return 0;}
+        
+    ret_val = EVP_PKEY_decrypt(ctx_p, secret, &outlen, enc_k, enc_k_len);
+    if (ret_val<=0){printf("DECRYPTION Error: EVP_PKEY_decrypt\n"); return 0;}
+    
+    EVP_PKEY_free(TempPrivkey);
+    EVP_PKEY_CTX_free(ctx_p);
+    /** END DECRYPT Session KEY using TEMP PRIVKEY **/
+    
+    for (int i=0;i<12;i++){chat_iv[i] = buff[i+4+256];}
+    for (int i=0;i<32;i++){chat_session_key[i] = secret[i];}
+    printf("\nCHAT SESSION KEY: ");
+    for (int k=0;k<32;k++){
+        printf("%02x ", chat_session_key[k]);
+    }
+    
+    free(secret);
+    free(enc_k);
+    free(cmp_buff);
+    
+    printf("\nFriend Key Exchange Completed\n");
+    for(;;);
+    
+}
+
+
+
+int friend_begin_negotiation_old()
 {
     unsigned char rand_val[32];
     unsigned char chat_nonce_R1[32];
@@ -640,7 +955,7 @@ int friend_begin_negotiation()
 }    
 
 
-int friend_wait_negotiation()
+int friend_wait_negotiation_old()
 {
     unsigned char rand_val[32];
     unsigned char* chat_nonce_R1;
@@ -902,7 +1217,7 @@ void* receiver_Task(void *vargp)
                             if (fputs (data, f) == EOF) {printf("\n\Error writing Pubkey\n");}
                             fclose (f); 
                         }
-                    
+                    printf("Caller Handshake Begin\n");
                     ret_val = friend_begin_negotiation(); // saves the chat session key and iv
                     if (ret_val>0)
                         chat_with_friend_flag = 1;
@@ -917,6 +1232,7 @@ void* receiver_Task(void *vargp)
                         if (fputs (data, f) == EOF) {printf("\n\Error writing Pubkey\n");}
                         fclose (f); 
                     }
+                    printf("Receiver Handshake Waiting...\n");
                     ret_val = friend_wait_negotiation(); // saves the chat session key and iv
                     if (ret_val>0)
                         chat_with_friend_flag = 1;

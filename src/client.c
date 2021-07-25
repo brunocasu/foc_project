@@ -239,7 +239,7 @@ int server_secure_receive(int sockfd, unsigned char* iv, unsigned char* key, uns
     msg_size = read(sockfd, buff, MAX_BUFF);
     
     if ((msg_size<32+strlen(Username))||(msg_size>MAX_BUFF)) {printf("AES Received wrong message length\n"); return 0;}
-    printf("AES Received (%d)\n", msg_size);
+    // printf("AES Received (%d)\n", msg_size);
 
     
     aad_len = 16+strlen(Username);
@@ -1007,7 +1007,7 @@ void* sender_Task(void *vargp)
             } // lock until response
             
             if (strlen(sbuff)>0){
-                printf("Send to Server: (%ld)\n", strlen(sbuff));
+                //printf("Send to Server: (%ld)\n", strlen(sbuff));
                 server_secure_send(sockfd, iv, session_key, sbuff, strlen(sbuff));}
             
         }
@@ -1016,16 +1016,16 @@ void* sender_Task(void *vargp)
             for(int i=0;i<5;i++){ipt_cmd_chat[i] = sbuff[i];}
             if(strncmp(ipt_cmd_chat, "/exit", 5)==0){
                 chat_with_friend_flag = 0; //exit chat
-                //server_secure_send(sockfd, iv, session_key, "exitx", 5);
-                //close(sockfd); exit(0);
+                server_secure_send(sockfd, iv, session_key, "exitx", 5);
+                close(sockfd); exit(0);
             }
-            if (strlen(friend_sbuff)>0){
+            if (strlen(sbuff)>0){
                 outlen = chat_encrypt(enc_buff, sbuff , strlen(sbuff));
             
                 for(int i=0;i<4;i++){friend_sbuff[i] = cmd_frwd[i];}
                 for(int i=0;i<outlen;i++){friend_sbuff[i+4] = enc_buff[i];}
             
-                printf("Send to Server: (%d)\n", outlen+4);
+                // printf("Send to Server: (%d)\n", outlen+4);
                 server_secure_send(sockfd, iv, session_key, friend_sbuff, outlen+4);
             }
             
@@ -1060,7 +1060,7 @@ void* receiver_Task(void *vargp)
         
         msg_len = server_secure_receive(sockfd, iv, session_key, buff);
         //pthread_mutex_lock(&mutex_print);
-        printf("From Server (%d)\n",msg_len);
+        // printf("From Server (%d)\n",msg_len);
         if (msg_len > 4){
             for (int i=0;i<4;i++){rec_cmd[i]=buff[i];} // Save received COMMAND
             for (int i=0;i<msg_len-4;i++){data[i]=buff[i+4];} // Save received DATA
@@ -1102,11 +1102,12 @@ void* receiver_Task(void *vargp)
             }
             else if ((strncmp(rec_cmd, "frwd", 4)==0)&&(chat_with_friend_flag == 1)){
                 clear_len = chat_decrypt(clear_txt, data, msg_len-4);                
-                printf("\nMessasgeApp[CHAT]->Received<%s>: %s\n", friendname, clear_txt);
+                printf("\nMessasgeApp[CHAT]<%s>: %s", friendname, clear_txt);
                 for (int i=0;i< clear_len;i++){clear_txt[i]='\0';}
             }
             else if (strncmp(rec_cmd, "refu", 4)==0){
-                printf("\nMessageApp - REFUSED BY: %s\n", data); 
+                printf("\nMessageApp - Chat REFUSED by <%s>\n", data);
+                caller = 0;
             }
             else if (strncmp(rec_cmd, "list", 4)==0){
                 printf("\nMessageApp - ONLINE USERS:\n%s", data);
@@ -1121,6 +1122,7 @@ void* receiver_Task(void *vargp)
         }
         else if (msg_len>0){printf("Server msg too short"); }
         else {close(sockfd); exit(0);} //close connection
+        for (int i=0;i<MAX_BUFF;i++){data[i]='\0';} // clear data buffer
     }
 }
   

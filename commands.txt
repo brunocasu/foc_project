@@ -11,6 +11,12 @@ openssl rsa -in privkey.pem -passin pass:alicepwd -pubout -out alicekey.pem
 openssl genrsa -aes256 -passout pass:bobpwd -out privkey.pem 2048
 openssl rsa -in privkey.pem -passin pass:bobpwd -pubout -out bobkey.pem
 
+openssl genrsa -aes256 -passout pass:clairepwd -out privkey.pem 2048
+openssl rsa -in privkey.pem -passin pass:clairepwd -pubout -out clairekey.pem
+
+openssl genrsa -aes256 -passout pass:danielpwd -out privkey.pem 2048
+openssl rsa -in privkey.pem -passin pass:danielpwd -pubout -out danielkey.pem
+
 2. generate certificate and pub key for the server
 Use certificate tool
 

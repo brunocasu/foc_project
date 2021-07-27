@@ -30,7 +30,7 @@ struct client_id {
     char username[16];
     int username_len;
     int connfd;
-    unsigned char iv[12];
+    //unsigned char iv[12];
     unsigned char key[32];
     int pending;
     unsigned char counter[16];
@@ -96,12 +96,13 @@ int channel_secure_send(int channel, unsigned char* send_text, int text_len)
     int aad_len = 16+usr_data[channel].username_len;
     unsigned char tag[16];
     unsigned char out[MAX_BUFF];
+    unsigned char iv[12];
     int carry=0;
 
     aad = malloc(aad_len);
     for (int i=0;i<usr_data[channel].username_len;i++){aad[i] = usr_data[channel].username[i];}
     for (int i=0;i<16;i++){aad[i+usr_data[channel].username_len] = usr_data[channel].counter[i];}
-    
+    for (int i=0;i<12;i++){iv[i] = usr_data[channel].counter[i];}
     // increment 16 byte counter
     usr_data[channel].counter[0] = usr_data[channel].counter[0]+1; 
     if (usr_data[channel].counter[0]==0){carry=1;}
@@ -115,7 +116,7 @@ int channel_secure_send(int channel, unsigned char* send_text, int text_len)
         }
     }
     
-    int outlen = EncryptAES_256_GCM(out, send_text, text_len, aad, aad_len, usr_data[channel].iv, usr_data[channel].key, tag); // return out and tag    
+    int outlen = EncryptAES_256_GCM(out, send_text, text_len, aad, aad_len, iv, usr_data[channel].key, tag); // return out and tag    
     if (outlen<=0){printf("Error: EncryptAES_256_GCM\n"); return 0;}
     
     unsigned char* auth_msg = malloc(outlen+aad_len+16);
@@ -149,6 +150,7 @@ int channel_secure_receive(int channel, unsigned char* clear_text)
     unsigned char rec_tag[16];
     unsigned char rec_counter_val[16];
     unsigned char rec_username[16];
+    unsigned char iv[12];
     int aad_len;
     int carry=0;
     
@@ -190,9 +192,10 @@ int channel_secure_receive(int channel, unsigned char* clear_text)
     
     if(strncmp(rec_username, usr_data[channel].username, usr_data[channel].username_len) != 0){printf("AES WRONG Usrname at Server comm\n"); return 0;}
     if(strncmp(rec_counter_val, usr_data[channel].counter, 16) != 0){printf("AES WRONG Counter value at Server comm\n"); return 0;}
+    for(int i=0;i<12;i++){iv[i] = usr_data[channel].counter[i];}
     
     unsigned char decrypt_buff[MAX_BUFF];
-    int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-(16+aad_len), rec_aad, aad_len, usr_data[channel].iv, usr_data[channel].key, rec_tag);
+    int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-(16+aad_len), rec_aad, aad_len, iv, usr_data[channel].key, rec_tag);
     if (clear_len<0){printf("AES DECRYPTION FAILED at at Server comm\n"); return 0;}
 
     for (int i=0;i<clear_len;i++)
@@ -581,14 +584,14 @@ int MessageApp_handshake(int channel)
     /** RECEIVE {R2 + {K}TempPubk}Signature + IV + {K}TempPubk */
     msg_size = read(usr_data[channel].connfd, buff, MAX_BUFF);
     printf("Received User authentication and Encrypted Key (%d)\n", msg_size );
-    if(msg_size<=256+12){printf("Signature from client Error - no key sent\n"); return 0;}
+    if(msg_size<=256){printf("Signature from client Error - no key sent\n"); return 0;}
     unsigned char client_signature[256];
-    int enc_k_len = msg_size-256-12;
+    int enc_k_len = msg_size-256;
     unsigned char * enc_k = malloc(enc_k_len);
     unsigned char * cmp_buff = malloc(enc_k_len+32);
     for (int i=0;i<32;i++){cmp_buff[i] = handshake_nonce_R2[i];}
     for (int i=0;i<256;i++){client_signature[i] = buff[i];}
-    for (int i=0;i<enc_k_len;i++){enc_k[i] = buff[i+256+12]; cmp_buff[i+32] = buff[i+256+12];}
+    for (int i=0;i<enc_k_len;i++){enc_k[i] = buff[i+256]; cmp_buff[i+32] = buff[i+256];}
     
     /** BEGIN AUTHENTICATE USER BY PUBKEY **/
     char *pubkey_extension = "key.pem";
@@ -648,7 +651,7 @@ int MessageApp_handshake(int channel)
     EVP_PKEY_CTX_free(ctx_p);
     /** END DECRYPT Session KEY using TEMP PRIVKEY **/
     
-    for (int i=0;i<12;i++){usr_data[channel].iv[i] = buff[i+256];}
+    //for (int i=0;i<12;i++){usr_data[channel].iv[i] = buff[i+256];}
     for (int i=0;i<32;i++){usr_data[channel].key[i] = secret[i];}
     printf("\nCHANNEL (%d) SESSION KEY: ", channel);
     for (int k=0;k<32;k++){
@@ -724,13 +727,16 @@ void* MessageApp_channel_0(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
-                            for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
-                            printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
-                            channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
-                            //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
-                            usr_data[channel].pending = 1;
-                            usr_data[friend_channel].pending = 1;
+                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                                for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
+                                for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
+                                printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
+                                channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
+                                //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
+                                usr_data[channel].pending = 1;
+                                usr_data[friend_channel].pending = 1;
+                            }
+                            else{channel_secure_send(channel, "erroUsername Already in Chat!", 29);}
                             break;} 
                         else {
                             friend_channel++;}
@@ -872,13 +878,16 @@ void* MessageApp_channel_1(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
-                            for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
-                            printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
-                            channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
-                            //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
-                            usr_data[channel].pending = 1;
-                            usr_data[friend_channel].pending = 1;
+                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                                for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
+                                for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
+                                printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
+                                channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
+                                //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
+                                usr_data[channel].pending = 1;
+                                usr_data[friend_channel].pending = 1;
+                            }
+                            else{channel_secure_send(channel, "erroUsername Already in Chat!", 29);}
                             break;} 
                         else {
                             friend_channel++;}
@@ -1021,13 +1030,16 @@ void* MessageApp_channel_2(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
-                            for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
-                            printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
-                            channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
-                            //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
-                            usr_data[channel].pending = 1;
-                            usr_data[friend_channel].pending = 1;
+                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                                for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
+                                for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
+                                printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
+                                channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
+                                //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
+                                usr_data[channel].pending = 1;
+                                usr_data[friend_channel].pending = 1;
+                            }
+                            else{channel_secure_send(channel, "erroUsername Already in Chat!", 29);}
                             break;} 
                         else {
                             friend_channel++;}
@@ -1170,13 +1182,16 @@ void* MessageApp_channel_3(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
-                            for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
-                            printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
-                            channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
-                            //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
-                            usr_data[channel].pending = 1;
-                            usr_data[friend_channel].pending = 1;
+                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                                for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
+                                for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
+                                printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
+                                channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
+                                //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
+                                usr_data[channel].pending = 1;
+                                usr_data[friend_channel].pending = 1;
+                            }
+                            else{channel_secure_send(channel, "erroUsername Already in Chat!", 29);}
                             break;} 
                         else {
                             friend_channel++;}
@@ -1318,13 +1333,16 @@ void* MessageApp_channel_4(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
-                            for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
-                            printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
-                            channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
-                            //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
-                            usr_data[channel].pending = 1;
-                            usr_data[friend_channel].pending = 1;
+                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                                for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
+                                for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
+                                printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
+                                channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
+                                //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
+                                usr_data[channel].pending = 1;
+                                usr_data[friend_channel].pending = 1;
+                            }
+                            else{channel_secure_send(channel, "erroUsername Already in Chat!", 29);}
                             break;} 
                         else {
                             friend_channel++;}
@@ -1466,13 +1484,16 @@ void* MessageApp_channel_5(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
-                            for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
-                            printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
-                            channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
-                            //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
-                            usr_data[channel].pending = 1;
-                            usr_data[friend_channel].pending = 1;
+                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                                for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
+                                for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
+                                printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
+                                channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
+                                //write(usr_data[channel].connfd, msg_to_send, 4+usr_data[channel].username_len);
+                                usr_data[channel].pending = 1;
+                                usr_data[friend_channel].pending = 1;
+                            }
+                            else{channel_secure_send(channel, "erroUsername Already in Chat!", 29);}
                             break;} 
                         else {
                             friend_channel++;}

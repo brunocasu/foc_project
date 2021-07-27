@@ -33,7 +33,8 @@ struct client_id {
     //unsigned char iv[12];
     unsigned char key[32];
     int pending;
-    unsigned char counter[16];
+    unsigned char counter_client_server[16];
+    unsigned char counter_server_client[16];
 };
 
 int MessageApp_OpenListener(int port);
@@ -101,15 +102,16 @@ int channel_secure_send(int channel, unsigned char* send_text, int text_len)
 
     aad = malloc(aad_len);
     for (int i=0;i<usr_data[channel].username_len;i++){aad[i] = usr_data[channel].username[i];}
-    for (int i=0;i<16;i++){aad[i+usr_data[channel].username_len] = usr_data[channel].counter[i];}
-    for (int i=0;i<12;i++){iv[i] = usr_data[channel].counter[i];}
+    for (int i=0;i<16;i++){aad[i+usr_data[channel].username_len] = usr_data[channel].counter_server_client[i];}
+    for (int i=0;i<12;i++){iv[i] = usr_data[channel].counter_server_client[i];}
     // increment 16 byte counter
-    usr_data[channel].counter[0] = usr_data[channel].counter[0]+1; 
-    if (usr_data[channel].counter[0]==0){carry=1;}
+    usr_data[channel].counter_server_client[0] = usr_data[channel].counter_server_client[0]+1; 
+    
+    if (usr_data[channel].counter_server_client[0]==0){carry=1;}
     for (int n=0;n<15;n++){    
-        if (usr_data[channel].counter[n]==0 && carry==1){
-            usr_data[channel].counter[n+1] = usr_data[channel].counter[n+1]+1;
-            if (usr_data[channel].counter[n+1]==0)
+        if (usr_data[channel].counter_server_client[n]==0 && carry==1){
+            usr_data[channel].counter_server_client[n+1] = usr_data[channel].counter_server_client[n+1]+1;
+            if (usr_data[channel].counter_server_client[n+1]==0)
                 carry=1;
             else
                 carry=0;
@@ -191,8 +193,8 @@ int channel_secure_receive(int channel, unsigned char* clear_text)
     //printf("username (%ld) <%s>\n",usr_data[channel].username_len, Username );
     
     if(strncmp(rec_username, usr_data[channel].username, usr_data[channel].username_len) != 0){printf("AES WRONG Usrname at Server comm\n"); return 0;}
-    if(strncmp(rec_counter_val, usr_data[channel].counter, 16) != 0){printf("AES WRONG Counter value at Server comm\n"); return 0;}
-    for(int i=0;i<12;i++){iv[i] = usr_data[channel].counter[i];}
+    if(strncmp(rec_counter_val, usr_data[channel].counter_client_server, 16) != 0){printf("AES WRONG Counter value at Server comm\n"); return 0;}
+    for(int i=0;i<12;i++){iv[i] = usr_data[channel].counter_client_server[i];}
     
     unsigned char decrypt_buff[MAX_BUFF];
     int clear_len = DecryptAES_256_GCM(decrypt_buff, tcp_msg, msg_size-(16+aad_len), rec_aad, aad_len, iv, usr_data[channel].key, rec_tag);
@@ -202,12 +204,12 @@ int channel_secure_receive(int channel, unsigned char* clear_text)
         clear_text[i] = decrypt_buff[i];
     
     // increment 16 byte counter
-    usr_data[channel].counter[0] = usr_data[channel].counter[0]+1; 
-    if (usr_data[channel].counter[0]==0){carry=1;}
+    usr_data[channel].counter_client_server[0] = usr_data[channel].counter_client_server[0]+1; 
+    if (usr_data[channel].counter_client_server[0]==0){carry=1;}
     for (int n=0;n<15;n++){    
-        if (usr_data[channel].counter[n]==0 && carry==1){
-            usr_data[channel].counter[n+1] = usr_data[channel].counter[n+1]+1;
-            if (usr_data[channel].counter[n+1]==0)
+        if (usr_data[channel].counter_client_server[n]==0 && carry==1){
+            usr_data[channel].counter_client_server[n+1] = usr_data[channel].counter_client_server[n+1]+1;
+            if (usr_data[channel].counter_client_server[n+1]==0)
                 carry=1;
             else
                 carry=0;
@@ -727,7 +729,7 @@ void* MessageApp_channel_0(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                            if(usr_data[friend_channel].pending == 0){ // if new chat request is received deflect
                                 for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
                                 for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
                                 printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
@@ -878,7 +880,7 @@ void* MessageApp_channel_1(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                            if(usr_data[friend_channel].pending == 0){ // if new chat request is received deflect
                                 for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
                                 for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
                                 printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
@@ -1030,7 +1032,7 @@ void* MessageApp_channel_2(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                            if(usr_data[friend_channel].pending == 0){ // if new chat request is received deflect
                                 for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
                                 for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
                                 printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
@@ -1182,7 +1184,7 @@ void* MessageApp_channel_3(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                            if(usr_data[friend_channel].pending == 0){ // if new chat request is received deflect
                                 for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
                                 for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
                                 printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
@@ -1333,7 +1335,7 @@ void* MessageApp_channel_4(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                            if(usr_data[friend_channel].pending == 0){ // if new chat request is received deflect
                                 for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
                                 for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
                                 printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);
@@ -1484,7 +1486,7 @@ void* MessageApp_channel_5(void *vargp)
                         if (strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0){ // found matching username fomr database
                             //msg_to_send = malloc(4+usr_data[channel].username_len);
                             printf("friend found: %s - <%s>\n", data, usr_data[friend_channel].username);
-                            if(usr_data[friend_channel].username == 0){ // if new chat request is received deflect
+                            if(usr_data[friend_channel].pending == 0){ // if new chat request is received deflect
                                 for(int i=0;i<4;i++){msg_to_send[i] = cmd_reqt[i];}
                                 for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
                                 printf("received chat Send Ch (%d) TO Ch (%d) - (%d): %s\n", channel, friend_channel, 4+usr_data[channel].username_len, msg_to_send);

@@ -29,13 +29,15 @@
 char* Username;
 char friendname[16];
 unsigned char session_key[32];
-unsigned char session_counter[16] = {0};
+unsigned char session_counter_client_server[16] = {0};
+unsigned char session_counter_server_client[16] = {0};
 int sockfd;
 int caller=0; // caller is 1 if you is the one who started the chat
 int chat_with_friend_flag = 0; // flag is set to one to add the chat session key in the encryption
 //unsigned char chat_iv[12];
 unsigned char chat_session_key[32];
-unsigned char chat_counter[16] = {0};
+unsigned char chat_counter_myself_to_friend[16] = {0};
+unsigned char chat_counter_friend_to_myself[16] = {0};
 pthread_mutex_t mutex_print;
 EVP_PKEY* privkey;
 
@@ -170,15 +172,15 @@ int server_secure_send(int sockfd, unsigned char* key, unsigned char* send_text,
 
     aad = malloc(aad_len);
     for (int i=0;i<strlen(Username);i++){aad[i] = Username[i];}
-    for (int i=0;i<16;i++){aad[i+strlen(Username)] = session_counter[i];}
-    for (int i=0;i<12;i++){iv[i] = session_counter[i];}
+    for (int i=0;i<16;i++){aad[i+strlen(Username)] = session_counter_client_server[i];}
+    for (int i=0;i<12;i++){iv[i] = session_counter_client_server[i];}
     // increment 16 byte counter
-    session_counter[0] = session_counter[0]+1; 
-    if (session_counter[0]==0){carry=1;}
+    session_counter_client_server[0] = session_counter_client_server[0]+1; 
+    if (session_counter_client_server[0]==0){carry=1;}
     for (int n=0;n<15;n++){    
-        if (session_counter[n]==0 && carry==1){
-            session_counter[n+1] = session_counter[n+1]+1;
-            if (session_counter[n+1]==0)
+        if (session_counter_client_server[n]==0 && carry==1){
+            session_counter_client_server[n+1] = session_counter_client_server[n+1]+1;
+            if (session_counter_client_server[n+1]==0)
                 carry=1;
             else
                 carry=0;
@@ -261,7 +263,7 @@ int server_secure_receive(int sockfd, unsigned char* key, unsigned char* clear_t
     //printf("username (%ld) <%s>\n",strlen(Username), Username );
     
     if(strncmp(rec_username, Username, strlen(Username)) != 0){printf("AES WRONG Usrname at Server comm\n"); return 0;}
-    if(strncmp(rec_counter_val, session_counter, 16) != 0){printf("AES WRONG Counter value at Server comm\n"); return 0;}
+    if(strncmp(rec_counter_val, session_counter_server_client, 16) != 0){printf("AES WRONG Counter value at Server comm\n"); return 0;}
     
     for (int i=0;i<12;i++){iv[i] = rec_counter_val[i];}
     
@@ -273,12 +275,12 @@ int server_secure_receive(int sockfd, unsigned char* key, unsigned char* clear_t
         clear_text[i] = decrypt_buff[i];
     
     // increment 16 byte counter
-    session_counter[0] = session_counter[0]+1; 
-    if (session_counter[0]==0){carry=1;}
+    session_counter_server_client[0] = session_counter_server_client[0]+1; 
+    if (session_counter_server_client[0]==0){carry=1;}
     for (int n=0;n<15;n++){    
-        if (session_counter[n]==0 && carry==1){
-            session_counter[n+1] = session_counter[n+1]+1;
-            if (session_counter[n+1]==0)
+        if (session_counter_server_client[n]==0 && carry==1){
+            session_counter_server_client[n+1] = session_counter_server_client[n+1]+1;
+            if (session_counter_server_client[n+1]==0)
                 carry=1;
             else
                 carry=0;
@@ -896,15 +898,15 @@ int chat_encrypt(char* encrypted_txt, char* in ,int inlen)
     int carry = 0;
     
     for (int i=0;i<12;i++){aad[i] = auth_string[i];}
-    for (int i=0;i<16;i++){aad[i+12] = chat_counter[i];}
-    for (int i=0;i<12;i++){iv[i] = chat_counter[i];}
+    for (int i=0;i<16;i++){aad[i+12] = chat_counter_myself_to_friend[i];}
+    for (int i=0;i<12;i++){iv[i] = chat_counter_myself_to_friend[i];}
     // increment 16 byte counter
-    chat_counter[0] = chat_counter[0]+1; 
-    if (chat_counter[0]==0){carry=1;}
+    chat_counter_myself_to_friend[0] = chat_counter_myself_to_friend[0]+1; 
+    if (chat_counter_myself_to_friend[0]==0){carry=1;}
     for (int n=0;n<15;n++){    
-        if (chat_counter[n]==0 && carry==1){
-            chat_counter[n+1] = chat_counter[n+1]+1;
-            if (chat_counter[n+1]==0)
+        if (chat_counter_myself_to_friend[n]==0 && carry==1){
+            chat_counter_myself_to_friend[n+1] = chat_counter_myself_to_friend[n+1]+1;
+            if (chat_counter_myself_to_friend[n+1]==0)
                 carry=1;
             else
                 carry=0;
@@ -949,15 +951,15 @@ int chat_decrypt(char* clear_txt, char* in, int inlen)
     else {return 0;}
 
     if(strncmp(auth_string, rec_str, 12)!=0){printf("\nAES Decryption Chat FAILED - wrong AAD\n"); return 0;}
-    if(strncmp(chat_counter, rec_counter, 16)!=0){printf("\nAES Decryption Chat FAILED - wrong counter value\n"); return 0;}
+    if(strncmp(chat_counter_friend_to_myself, rec_counter, 16)!=0){printf("\nAES Decryption Chat FAILED - wrong counter value\n"); return 0;}
     
     // increment 16 byte counter
-    chat_counter[0] = chat_counter[0]+1; 
-    if (chat_counter[0]==0){carry=1;}
+    chat_counter_friend_to_myself[0] = chat_counter_friend_to_myself[0]+1; 
+    if (chat_counter_friend_to_myself[0]==0){carry=1;}
     for (int n=0;n<15;n++){    
-        if (chat_counter[n]==0 && carry==1){
-            chat_counter[n+1] = chat_counter[n+1]+1;
-            if (chat_counter[n+1]==0)
+        if (chat_counter_friend_to_myself[n]==0 && carry==1){
+            chat_counter_friend_to_myself[n+1] = chat_counter_friend_to_myself[n+1]+1;
+            if (chat_counter_friend_to_myself[n+1]==0)
                 carry=1;
             else
                 carry=0;

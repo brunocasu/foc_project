@@ -40,6 +40,7 @@ unsigned char chat_counter_myself_to_friend[16] = {0};
 unsigned char chat_counter_friend_to_myself[16] = {0};
 pthread_mutex_t mutex_print;
 EVP_PKEY* privkey;
+int acpt_flag = 0;
 
 int chat_encrypt(char* encrypted_txt, char* in ,int inlen);
 int chat_decrypt(char* clear_txt, char* in, int inlen);
@@ -557,6 +558,7 @@ int friend_begin_negotiation()
     for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];}
     for(int i=0;i<32;i++){buff[i+4]=chat_nonce_R1[i];}
     /** SEND Nonce R1 */
+    sleep(1);
     server_secure_send(sockfd, session_key, buff, 36); // must add "frwd" cmd before string
     printf("Sent R1\n");
     
@@ -629,7 +631,7 @@ int friend_begin_negotiation()
     // Determine buffer size for encrypted length
     if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, chat_session_key, 32) <= 0)
     {printf("Error: EVP_PKEY_encrypt\n"); return 0;}
-    
+    printf("encrypted key length (%ld)",outlen);
     enc_k = OPENSSL_malloc(outlen);
     if (enc_k==NULL){printf("Malloc failed for username encryption\n"); return 0;}
 
@@ -643,6 +645,7 @@ int friend_begin_negotiation()
     char *sign_buff = malloc(32+outlen);
     if (sign_buff==NULL){printf("Malloc failed for username encryption\n"); return 0;}
     for (int i=0;i<32;i++){sign_buff[i]=chat_nonce_R2[i];}
+    printf("encrypted key length (%ld)",outlen);
     for (int i=0;i<outlen;i++){sign_buff[i+32]=enc_k[i];}
     
     md_ctx = EVP_MD_CTX_new();
@@ -660,12 +663,12 @@ int friend_begin_negotiation()
     if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
 
     EVP_MD_CTX_free(md_ctx);
-    EVP_PKEY_free(privkey);
-    
+    //EVP_PKEY_free(privkey);
+    printf("signature length (%d)",sign_size);
     for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];} // add protcol cmd
-    for (int i=0;i<256;i++) {buff[i+4] = signature[i];}
+    for (int i=0;i<sign_size;i++) {buff[i+4] = signature[i];}
     //for (int i=0;i<12;i++) {buff[i+4+256] = chat_iv[i];}
-    for (int i=0;i<outlen;i++) {buff[i+4+256] = enc_k[i];}
+    for (int i=0;i<outlen;i++) {buff[i+4+sign_size] = enc_k[i];}
 
 
     /** SEND Encrypted Key and signature */
@@ -676,11 +679,8 @@ int friend_begin_negotiation()
     for (int k=0;k<32;k++){
         printf("%02x ", chat_session_key[k]);
     }
-    
-    //printf("\nCHAT IV: ");
-    //for (int k=0;k<12;k++){
-    //    printf("%02x ", chat_iv[k]);
-    //}
+    for (int i=0;i<16;i++){chat_counter_myself_to_friend[i] = '\0';}
+    for (int i=0;i<16;i++){chat_counter_friend_to_myself[i] = '\0';}
     
     // receive confirmation message
     msg_len = server_secure_receive(sockfd, session_key, buff);
@@ -688,12 +688,6 @@ int friend_begin_negotiation()
     char clear_txt[500];
     unsigned char *msg = malloc(msg_len-4); // not considering the cmd sent
     for (int i=0;i<msg_len-4;i++){msg[i] = buff[i+4];};
-    
-    //printf("\nReceived : ");
-    //for (int k=0;k<msg_len-4;k++){
-    //    printf("%02x ", msg[k]);
-    //}
-    
     
     chat_decrypt(clear_txt, msg, msg_len-4);
     printf("\nFrom <%s>: %s\n", friendname, clear_txt);
@@ -784,7 +778,7 @@ int friend_wait_negotiation()
     if(ret_val == 0){printf("Error: EVP_SignFinal returned %d\n",ret_val); return 0;}
     
     EVP_MD_CTX_free(md_ctx);
-    EVP_PKEY_free(privkey);
+    //EVP_PKEY_free(privkey);
     /** END GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
     
     // build message TempPubk + R2 + {R1+TempPubk+R2}signed
@@ -862,10 +856,8 @@ int friend_wait_negotiation()
         printf("%02x ", chat_session_key[k]);
     }
     
-    //printf("\nCHAT IV: ");
-    //for (int k=0;k<12;k++){
-    //    printf("%02x ", chat_iv[k]);
-    //}
+    for (int i=0;i<16;i++){chat_counter_myself_to_friend[i] = '\0';}
+    for (int i=0;i<16;i++){chat_counter_friend_to_myself[i] = '\0';}
     
     free(secret);
     free(enc_k);
@@ -875,11 +867,6 @@ int friend_wait_negotiation()
     for (int i=0;i<4;i++){buff[i] = cmd_frwd[i];}
     for (int i=0;i<enc_len;i++){buff[i+4] = enc_buff[i];}
     
-    //printf("\nSend : ");
-    //for (int k=0;k<4+enc_len;k++){
-    //    printf("%02x ", buff[k]);
-    //}
-    //
     server_secure_send(sockfd, session_key, buff, 4+enc_len);
     printf("\nFriend Key Exchange Completed\n");
     return 1;
@@ -1009,7 +996,7 @@ void* sender_Task(void *vargp)
         if ((strlen(sbuff) > 0) && (sbuff[strlen (sbuff) - 1] == '\n'))
             sbuff[strlen (sbuff) - 1] = '\0';
         
-        if (chat_with_friend_flag == 0)
+        if ((chat_with_friend_flag == 0)&&(acpt_flag==0))
         {            
             for(int i=0;i<4;i++){ipt_cmd[i] = sbuff[i];}
             if(strncmp(ipt_cmd, cmd_chat, 4)==0){
@@ -1022,15 +1009,27 @@ void* sender_Task(void *vargp)
                 server_secure_send(sockfd, session_key, sbuff, strlen(sbuff));}
             
         }
+        else if (acpt_flag == 1){
+            for(int i=0;i<5;i++){ipt_cmd_chat[i] = sbuff[i];}
+            if((strncmp(ipt_cmd_chat, "acptx", 5)==0)||(strncmp(ipt_cmd_chat, "refux", 5)==0)){
+                acpt_flag = 0; 
+                for (int i=0;i<strlen(friendname);i++){sbuff[i+4]=friendname[i];}
+                server_secure_send(sockfd, session_key, sbuff, 4+strlen(friendname));
+            }
+            else {printf("\nInput Error - Chat still Holding...\n");}
+        
+        }
         else if (chat_with_friend_flag == 1)
         {
             for(int i=0;i<5;i++){ipt_cmd_chat[i] = sbuff[i];}
             if(strncmp(ipt_cmd_chat, "/exit", 5)==0){
                 chat_with_friend_flag = 0; //exit chat
-                server_secure_send(sockfd, session_key, "exitx", 5);
-                close(sockfd); exit(0);
+                caller = 0;
+                for(int i=0;i<16;i++){friendname[i] = '\0';}
+                server_secure_send(sockfd, session_key, "exchx", 5);
+                //close(sockfd); exit(0);
             }
-            if (strlen(sbuff)>0){
+            else if (strlen(sbuff)>0){
                 outlen = chat_encrypt(enc_buff, sbuff , strlen(sbuff));
             
                 for(int i=0;i<4;i++){friend_sbuff[i] = cmd_frwd[i];}
@@ -1064,6 +1063,9 @@ void* receiver_Task(void *vargp)
     int clear_len;
     unsigned char friend_pubkey_txt[451];
     int ret_val;
+    FILE *f;
+    char ipt_cmd_chat[5];
+    char sbuff[MAX_BUFF];
     
     for (;;) {
         
@@ -1072,25 +1074,29 @@ void* receiver_Task(void *vargp)
         msg_len = server_secure_receive(sockfd, session_key, buff);
         //pthread_mutex_lock(&mutex_print);
         //printf("From Server (%d)\n",msg_len);
+        for (int i=0;i<MAX_BUFF;i++){data[i]='\0';} // clear data buffer
         if (msg_len > 4){
             for (int i=0;i<4;i++){rec_cmd[i]=buff[i];} // Save received COMMAND
             for (int i=0;i<msg_len-4;i++){data[i]=buff[i+4];} // Save received DATA
             if(strncmp(rec_cmd, "reqt", 4)==0){ //received a request
+                for(int i=0;i<16;i++){friendname[i] = '\0';}
                 for(int i=0;i<msg_len-4;i++){friendname[i] = data[i];}
-                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?\n", friendname); 
+                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?\n", friendname);
+                acpt_flag = 1;
             }
             else if (strncmp(rec_cmd, "pubk", 4)==0){
                 if (caller==1){
                     printf("\nMessageApp Caller- Chat Accepted!\n");
                     // friend_pubkey_txt = malloc(msg_len-4);
                     for(int k=0;k<msg_len-4;k++){friend_pubkey_txt[k] = data[k];}
-                        FILE *f = fopen ("friendPubkey.pem", "ab+");
+                        f = fopen ("friendPubkey.pem", "w");
                         if (f != NULL) {
-                            if (fputs (data, f) == EOF) {printf("\n\Error writing Pubkey\n");}
+                            if (fputs (friend_pubkey_txt, f) == EOF) {printf("\n\Error writing Pubkey\n");}
                             fclose (f); 
                         }
+                    printf("\nFirend Pubk(%ld): %s \n", strlen(friend_pubkey_txt), friend_pubkey_txt); 
                     printf("Caller Handshake Begin\n");
-                    ret_val = friend_begin_negotiation(); // saves the chat session key and iv
+                    ret_val = friend_begin_negotiation(); // saves the chat session key
                     if (ret_val>0)
                         chat_with_friend_flag = 1;
                     else {printf("\nChat Key exchange failed"); }
@@ -1099,13 +1105,14 @@ void* receiver_Task(void *vargp)
                     printf("\nMessageApp Receiver- Chat Accepted!\n"); 
                     // friend_pubkey_txt = malloc(msg_len-4);
                     for(int k=0;k<msg_len-4;k++){friend_pubkey_txt[k] = data[k];}
-                    FILE *f = fopen ("friendPubkey.pem", "ab+");
+                    f = fopen ("friendPubkey.pem", "w");
                     if (f != NULL) {
-                        if (fputs (data, f) == EOF) {printf("\n\Error writing Pubkey\n");}
+                        if (fputs (friend_pubkey_txt, f) == EOF) {printf("\n\Error writing Pubkey\n");}
                         fclose (f); 
                     }
+                    printf("\nFirend Pubk(%ld): %s \n", strlen(friend_pubkey_txt), friend_pubkey_txt); 
                     printf("Receiver Handshake Waiting...\n");
-                    ret_val = friend_wait_negotiation(); // saves the chat session key and iv
+                    ret_val = friend_wait_negotiation(); // saves the chat session key
                     if (ret_val>0)
                         chat_with_friend_flag = 1;
                     else {printf("\nChat Key exchange failed"); }
@@ -1125,7 +1132,10 @@ void* receiver_Task(void *vargp)
                 //printf("\nSERVER[cmd][param]->");
             }
             else if (strncmp(rec_cmd, "erro", 4)==0){
-                printf("\nMessageApp - ERROR: %s\n", data);
+                printf("\nMessageApp: %s\n", data);
+                caller = 0;
+                acpt_flag = 0;
+                chat_with_friend_flag = 0;
                 //printf("\nSERVER[cmd][param]->");
             }
             else {printf("\nMessageApp - Unrecognized CMD\n");}
@@ -1133,7 +1143,7 @@ void* receiver_Task(void *vargp)
         }
         else if (msg_len>0){printf("Server msg too short"); }
         else {close(sockfd); exit(0);} //close connection
-        for (int i=0;i<MAX_BUFF;i++){data[i]='\0';} // clear data buffer
+        
     }
 }
   

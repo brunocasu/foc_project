@@ -365,7 +365,7 @@ int ClientHandshake()
     if ((strlen(username) > 0) && (username[strlen (username) - 1] == '\n'))
         username[strlen (username) - 1] = '\0';
     else {return 0;}
-    if (check_tainted_string(username, strlen(username)) != 0){ printf("Username containes invalid characters"); }   
+    if (check_tainted_string(username, strlen(username)) != 0){ printf("Username contains invalid characters"); return 0;}   
     Username = malloc(strlen(username));
     for (int i=0;i<strlen(username);i++){Username[i] = username[i];} // save username
     /** get privkey */

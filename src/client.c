@@ -1005,7 +1005,6 @@ void* sender_Task(void *vargp)
             } // lock until response
             
             if (strlen(sbuff)>0){
-                //printf("Send to Server: (%ld)\n", strlen(sbuff));
                 server_secure_send(sockfd, session_key, sbuff, strlen(sbuff));}
             
         }
@@ -1079,10 +1078,15 @@ void* receiver_Task(void *vargp)
             for (int i=0;i<4;i++){rec_cmd[i]=buff[i];} // Save received COMMAND
             for (int i=0;i<msg_len-4;i++){data[i]=buff[i+4];} // Save received DATA
             if(strncmp(rec_cmd, "reqt", 4)==0){ //received a request
-                for(int i=0;i<16;i++){friendname[i] = '\0';}
-                for(int i=0;i<msg_len-4;i++){friendname[i] = data[i];}
-                printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?\n", friendname);
-                acpt_flag = 1;
+                if (caller==1){
+                    printf("\nMessageApp: <%s>\n", data);
+                }
+                else{
+                    for(int i=0;i<16;i++){friendname[i] = '\0';}
+                    for(int i=0;i<msg_len-4;i++){friendname[i] = data[i];}
+                    printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?\n", friendname);
+                    acpt_flag = 1;
+                }
             }
             else if (strncmp(rec_cmd, "pubk", 4)==0){
                 if (caller==1){
@@ -1152,6 +1156,7 @@ int main(int count, char *args[])
     char* buff = malloc(16);
     char *hostname; 
     int portnum;
+    unsigned char tcp_msg[50]={0};
     pthread_t rec_id, sen_id;
     
     if ( count != 3 )
@@ -1167,7 +1172,9 @@ int main(int count, char *args[])
         exit(0);
     }
     sockfd = OpenConnection(hostname, portnum);
-
+    int msg_size = read(sockfd, tcp_msg, 50);
+    if (msg_size>0){printf("%s\n", tcp_msg);}
+    
     if (ClientHandshake() == 1){ // From the handshake, Client gets the session_key and iv
         
         // function for chat

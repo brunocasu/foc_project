@@ -516,9 +516,10 @@ int MessageApp_handshake(int channel)
     /** check for potentially dangerous characters in username */
     if (check_tainted_string(username, username_len)!=0){ printf("Usarname Contains Unsafe Charcters!\n"); return 0; }
     for(int n=0;n<MAX_CHANNELS;n++){
-        if(strncmp(username, usr_data[n].username, strlen(username))==0){ // user already logged in
+        if((strncmp(username, usr_data[n].username, strlen(username))==0)&&(strlen(username)==usr_data[n].username_len)){ // user already logged in
             write(usr_data[n].connfd, "MessageApp: USER ALREADY LOGGED", 31);
             close (usr_data[channel].connfd);
+            return 0;
         }
     }
     /** BEGIN GENERATE TEMPORARY RSA 2048 KEY PAIR **/
@@ -905,6 +906,10 @@ void* MessageApp_channel_Task(void *vargp)
                         printf("received list cmd \n");
                     }  
                     else if (strncmp("exit", rec_cmd, 4) == 0){
+                        if (usr_data[channel].pending == 2){
+                            usr_data[friend_channel].pending=0;
+                            channel_secure_send(friend_channel, "erroFriend Disconected from Chat", 32);
+                        } // disconect friend from chat
                         for (int i=0;i<16;i++){usr_data[channel].username[i] = '\0';} // remove user
                         close (usr_data[channel].connfd);
                         usr_data[channel].username_len = 0;
@@ -919,9 +924,14 @@ void* MessageApp_channel_Task(void *vargp)
                 }
                 else if (client_msg_len>0){printf("Received msg Error (%d)\n",client_msg_len);}
                 else {
+                    printf("Remove Client from Channel (%d)\n", channel);
+                    if ((usr_data[channel].pending == 2)||(usr_data[channel].pending == 4)){
+                        usr_data[friend_channel].pending=0;
+                        channel_secure_send(friend_channel, "erroFriend Disconected from Chat", 32);
+                    } // disconect friend from chat
                     for (int i=0;i<16;i++){usr_data[channel].username[i] = '\0';}
                     usr_data[channel].username_len = 0;
-                    usr_data[channel].pending =0;
+                    usr_data[channel].pending = 0;
                     close (usr_data[channel].connfd); 
                     break;}
                 printf("Cleanup\n");
@@ -958,10 +968,10 @@ int main(int n_input, char *input_args[])
     }
     server_sockfd = MessageApp_OpenListener(port);
 
-    pthread_create(&thread_id[MAX_CHANNELS+1], NULL, MessageApp_client_connect, NULL);
+    pthread_create(&thread_id[0], NULL, MessageApp_client_connect, NULL);
     for (int i=0;i<MAX_CHANNELS;i++){
         ch_array[i] = ch;
-        pthread_create(&thread_id[i], NULL, MessageApp_channel_Task, &ch_array[i]);
+        pthread_create(&thread_id[i+1], NULL, MessageApp_channel_Task, &ch_array[i]);
         ch++;
     }
     for (int i=0;i<MAX_CHANNELS+1;i++)

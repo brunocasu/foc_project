@@ -355,6 +355,7 @@ int ClientHandshake()
     char* tcp_msg;
     int ret_val;
     EVP_MD_CTX* md_ctx;
+    char err_message[31];
     
     unsigned char handshake_nonce_R1[32];
     unsigned char handshake_nonce_R2[32];
@@ -387,6 +388,12 @@ int ClientHandshake()
     
     /** RECEIVE R2 + TempPubkey + {R1+TempPubkey+R2}signed + CertS */
     msg_size = read(sockfd, buff, MAX_BUFF);
+    if (msg_size==31){
+        for (int i=0;i<31;i++)
+            err_message[i] = buff[i];
+        printf("Received: %s", err_message);
+        return 0;
+    }
     printf("Received Server authentication and Certificate (%d)\n", msg_size);
     if(msg_size<=426+32+256){printf("Signature from server Error - no certificate sent\n"); return 0;}
     char server_authentication_str[490]; // R1+TempPubkey+R2 -> 32+426+32 
@@ -401,7 +408,7 @@ int ClientHandshake()
     if(server_certificate==NULL){printf("server_certificate malloc failed\n"); return 0;}
     for (int i=0;i<msg_size-426-32-256;i++){server_certificate[i]=buff[i+426+32+256];}
     /** save server certificate */
-    FILE *f = fopen ("ServerCert.pem", "ab+");
+    FILE *f = fopen ("ServerCert.pem", "w");
     if (f != NULL) {
         if (fputs (server_certificate, f) == EOF) {printf("\n\Error Writing Certificate\n"); return 0;}
         fclose (f); 
@@ -521,7 +528,7 @@ int ClientHandshake()
     write(sockfd, buff, 256+outlen); 
     
     printf("\nSESSION KEY: ");
-    for (int k=0;k<32;k++){
+    for (int k=0;k<6;k++){
         printf("%02x ", session_key[k]);
     }
     
@@ -529,8 +536,13 @@ int ClientHandshake()
     
     msg_size = server_secure_receive(sockfd, session_key, buff);
     char *rcv_msg = malloc(msg_size);
-    for (int i=0;i<msg_size;i++){rcv_msg[i] = buff[i];}
-    printf("From Server: %s\n", rcv_msg);
+    if (msg_size>0){
+        for (int i=0;i<msg_size;i++){rcv_msg[i] = buff[i];}
+        printf("From Server: %s\n", rcv_msg);
+    }
+    else{
+        return 0;
+    }
     free(rcv_msg);
     
     return 1;
@@ -631,7 +643,7 @@ int friend_begin_negotiation()
     // Determine buffer size for encrypted length
     if (EVP_PKEY_encrypt(ctx_p, NULL, &outlen, chat_session_key, 32) <= 0)
     {printf("Error: EVP_PKEY_encrypt\n"); return 0;}
-    printf("encrypted key length (%ld)",outlen);
+    printf("encrypted key length (%ld)\n",outlen);
     enc_k = OPENSSL_malloc(outlen);
     if (enc_k==NULL){printf("Malloc failed for username encryption\n"); return 0;}
 
@@ -645,7 +657,7 @@ int friend_begin_negotiation()
     char *sign_buff = malloc(32+outlen);
     if (sign_buff==NULL){printf("Malloc failed for username encryption\n"); return 0;}
     for (int i=0;i<32;i++){sign_buff[i]=chat_nonce_R2[i];}
-    printf("encrypted key length (%ld)",outlen);
+    //printf("encrypted key length (%ld)",outlen);
     for (int i=0;i<outlen;i++){sign_buff[i+32]=enc_k[i];}
     
     md_ctx = EVP_MD_CTX_new();
@@ -676,7 +688,7 @@ int friend_begin_negotiation()
     printf("\nSent Signature to friend (%ld)\n", 4+256+outlen);
     
     printf("\nCHAT SESSION KEY: ");
-    for (int k=0;k<32;k++){
+    for (int k=0;k<6;k++){
         printf("%02x ", chat_session_key[k]);
     }
     for (int i=0;i<16;i++){chat_counter_myself_to_friend[i] = '\0';}
@@ -852,7 +864,7 @@ int friend_wait_negotiation()
     //for (int i=0;i<12;i++){chat_iv[i] = buff[i+4+256];}
     for (int i=0;i<32;i++){chat_session_key[i] = secret[i];}
     printf("\nCHAT SESSION KEY: ");
-    for (int k=0;k<32;k++){
+    for (int k=0;k<6;k++){
         printf("%02x ", chat_session_key[k]);
     }
     
@@ -1103,7 +1115,10 @@ void* receiver_Task(void *vargp)
                     ret_val = friend_begin_negotiation(); // saves the chat session key
                     if (ret_val>0)
                         chat_with_friend_flag = 1;
-                    else {printf("\nChat Key exchange failed"); }
+                    else {
+                        printf("\nChat Key exchange failed"); 
+                        caller = 0;
+                    }
                 }
                 else{                    
                     printf("\nMessageApp Receiver- Chat Accepted!\n"); 
@@ -1132,6 +1147,10 @@ void* receiver_Task(void *vargp)
                 caller = 0;
             }
             else if (strncmp(rec_cmd, "list", 4)==0){
+                printf("\nMessageApp - ONLINE USERS:\n%s", data);
+                //printf("\nSERVER[cmd][param]->");
+            }
+            else if (strncmp(rec_cmd, "help", 4)==0){
                 printf("\nMessageApp - ONLINE USERS:\n%s", data);
                 //printf("\nSERVER[cmd][param]->");
             }
@@ -1184,6 +1203,7 @@ int main(int count, char *args[])
         pthread_join(rec_id, NULL);
         pthread_join(sen_id, NULL);
     }
+    else {printf("FAILED HANDSHAKE\n");}
     // close the socket
     close(sockfd);
 } 

@@ -28,6 +28,7 @@
 
 char* Username;
 char friendname[16];
+int friendname_len=0;
 unsigned char session_key[32];
 unsigned char session_counter_client_server[16] = {0};
 unsigned char session_counter_server_client[16] = {0};
@@ -377,7 +378,7 @@ int ClientHandshake()
     if(privkey==NULL){printf("Error: PEM_read_PrivateKey returned NULL\n"); return 0; }
     /** generate nonce R1 */
     RAND_poll();
-    RAND_bytes(rand_val, 32);
+    if (RAND_bytes(rand_val, 32)!=1) {printf("RAND_bytes ERROR\n"); return 0;}
     hash_256_bits(rand_val, 32, handshake_nonce_R1);
     for (int i=0;i<32;i++){buff[i] = handshake_nonce_R1[i];}
     for (int i=0;i<strlen(username);i++){buff[i+32] = username[i];}
@@ -461,7 +462,7 @@ int ClientHandshake()
     
     /** SEND {R2 + {K}TempPubk }SigA + IV + {K}TempPubk */
     RAND_poll();
-    RAND_bytes(rand_val, 32);
+    if (RAND_bytes(rand_val, 32)!=1) {printf("RAND_bytes ERROR\n"); return 0;}
     hash_256_bits(rand_val, 32, session_key);
     /** retrieve temporary pubkey from txt */
     EVP_PKEY* TempPubkey = EVP_PKEY_new();
@@ -564,7 +565,7 @@ int friend_begin_negotiation()
     printf("\nBegin Negotiation\n");
     
     RAND_poll();
-    RAND_bytes(rand_val, 32);
+    if (RAND_bytes(rand_val, 32)!=1) {printf("RAND_bytes ERROR\n"); return 0;}
     hash_256_bits(rand_val, 32, chat_nonce_R1);
     
     for(int i=0;i<4;i++){buff[i]=cmd_frwd[i];}
@@ -615,7 +616,7 @@ int friend_begin_negotiation()
     /** END AUTHENTICATE FRIEND BY PUBKEY */
     
     RAND_poll();
-    RAND_bytes(rand_val, 32);
+    if (RAND_bytes(rand_val, 32)!=1) {printf("RAND_bytes ERROR\n"); return 0;}
     hash_256_bits(rand_val, 32, chat_session_key);
     //RAND_poll();
     //RAND_bytes(chat_iv, 12);
@@ -767,7 +768,7 @@ int friend_wait_negotiation()
     
     /** BEGIN GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
     RAND_poll();
-    RAND_bytes(rand_val, 32);
+    if (RAND_bytes(rand_val, 32)!=1) {printf("RAND_bytes ERROR\n"); return 0;}
     hash_256_bits(rand_val, 32, chat_nonce_R2);
     
     char nonce_buff[TempPubkey_txt_len+64]; // R1 + TEMP PUBKEY + R2
@@ -994,13 +995,15 @@ void* sender_Task(void *vargp)
     char ipt_cmd_chat[5];
     char enc_buff[MAX_BUFF];
     int outlen;
+    int calling_flag=0;
     
         
     for (;;) {
             
         //pthread_mutex_lock(&mutex_print);
-        if (chat_with_friend_flag == 0){printf("\nMessasgeApp[SERVER-COMMAND]->\n");}
-        else if (chat_with_friend_flag == 1){printf("\nMessasgeApp[CHAT]->\n");}
+        if (chat_with_friend_flag == 0){printf("MessasgeApp[SERVER-COMMAND]->\n");}
+        //else if (chat_with_friend_flag == 1){printf("\nMessasgeApp[CHAT]->\n");}
+        else if (chat_with_friend_flag == 1){printf("MessasgeApp[CHAT]->\n");}
          // send command to server
         
         fgets(sbuff, MAX_BUFF, stdin);
@@ -1010,15 +1013,20 @@ void* sender_Task(void *vargp)
         
         if ((chat_with_friend_flag == 0)&&(acpt_flag==0))
         {            
-            for(int i=0;i<4;i++){ipt_cmd[i] = sbuff[i];}
-            if(strncmp(ipt_cmd, cmd_chat, 4)==0){
-                caller=1;
-                for (int i=0;i<strlen(sbuff)-4;i++){friendname[i] = sbuff[i+4];}
-            } // lock until response
-            
             if (strlen(sbuff)>0){
-                server_secure_send(sockfd, session_key, sbuff, strlen(sbuff));}
-            
+                for(int i=0;i<4;i++){ipt_cmd[i] = sbuff[i];}
+                if((strncmp(ipt_cmd, cmd_chat, 4)==0)&&(caller==0)){
+                    caller=1;
+                    for(int i=0;i<16;i++){friendname[i] = '\0';}
+                    for (int i=0;i<strlen(sbuff)-5;i++){friendname[i] = sbuff[i+5];}
+                    for (int i=0;i<strlen(sbuff)-5;i++){sbuff[i+4] = sbuff[i+5];}
+                    sbuff[strlen(sbuff)]='\0';
+                    server_secure_send(sockfd, session_key, sbuff, strlen(sbuff)-1);
+                }
+                else{
+                    server_secure_send(sockfd, session_key, sbuff, strlen(sbuff));
+                }
+            }
         }
         else if (acpt_flag == 1){
             for(int i=0;i<5;i++){ipt_cmd_chat[i] = sbuff[i];}
@@ -1069,7 +1077,6 @@ void* receiver_Task(void *vargp)
     int dec_size;
     char rec_cmd[4];
     unsigned char buff[MAX_BUFF];
-    char friend_name[16];
     char clear_txt[MAX_BUFF];
     int clear_len;
     unsigned char friend_pubkey_txt[451];
@@ -1077,6 +1084,7 @@ void* receiver_Task(void *vargp)
     FILE *f;
     char ipt_cmd_chat[5];
     char sbuff[MAX_BUFF];
+    
     
     for (;;) {
         
@@ -1094,10 +1102,14 @@ void* receiver_Task(void *vargp)
                     printf("\nMessageApp: <%s>\n", data);
                 }
                 else{
-                    for(int i=0;i<16;i++){friendname[i] = '\0';}
-                    for(int i=0;i<msg_len-4;i++){friendname[i] = data[i];}
-                    printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?\n", friendname);
-                    acpt_flag = 1;
+                    if ((msg_len-4)<=16){
+                        friendname_len = msg_len-4;
+                        for(int i=0;i<msg_len-4;i++){friendname[i] = data[i];}
+                        friendname[friendname_len] = '\0';
+                        printf("\nMessageApp - REQUEST TO CHAT FROM: <%s> ACCEPT?\n", friendname);
+                        acpt_flag = 1;
+                    }
+                    else {printf("\nReceived wrong username Size\n");}
                 }
             }
             else if (strncmp(rec_cmd, "pubk", 4)==0){
@@ -1139,7 +1151,7 @@ void* receiver_Task(void *vargp)
             }
             else if ((strncmp(rec_cmd, "frwd", 4)==0)&&(chat_with_friend_flag == 1)){
                 clear_len = chat_decrypt(clear_txt, data, msg_len-4);                
-                printf("\nMessasgeApp[CHAT]<%s>: %s\n", friendname, clear_txt);
+                printf("MessasgeApp[CHAT]<%s>: %s\n", friendname, clear_txt);
                 for (int i=0;i< clear_len;i++){clear_txt[i]='\0';}
             }
             else if (strncmp(rec_cmd, "refu", 4)==0){

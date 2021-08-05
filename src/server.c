@@ -35,6 +35,7 @@ struct client_id {
     unsigned char counter_client_server[16];
     unsigned char counter_server_client[16];
     int caller_ch;
+    int caller_flag; // one if the user is a caller, and zero if it is a receiver
 };
 
 int MessageApp_OpenListener(int port);
@@ -568,7 +569,7 @@ int MessageApp_handshake(int channel)
     
     /** BEGIN GENERATE SIGNATURE FOR  R1 + TEMP PUBKEY + R2 **/
     RAND_poll();
-    RAND_bytes(rand_val, 32);
+    if (RAND_bytes(rand_val, 32)!=1) {printf("RAND_bytes ERROR\n"); return 0;}
     hash_256_bits(rand_val, 32, handshake_nonce_R2);
     
     char nonce_buff[TempPubkey_txt_len+64]; // R1 + TEMP PUBKEY + R2
@@ -734,7 +735,8 @@ void* MessageApp_channel_Task(void *vargp)
         char rec_cmd[4] = {0};
         char data[MAX_BUFF];
         char msg_to_send[MAX_BUFF];
-        int friend_channel = 0;
+        int friend_channel = 0; // to who you send messages
+        int caller_channel = 0; // from who you receive messages
         int user_pubkey_len;
         char user_pubkey[600];
         //int in_chat_flag = 0;
@@ -748,13 +750,13 @@ void* MessageApp_channel_Task(void *vargp)
         char *cmd_exit ="exit";
         char *cmd_help ="help";
         char *in_chat_str="[IN CHAT]";
-        char *help_string = "helpMessageApp Interface Commands\n \
+        char *help_string = "helpMessageApp Version 1.0\n \
                             Server commands:\n \
                             [SERVER-COMMAND]->listx (list online users)\n \
                             [SERVER-COMMAND]->exitx (logoff the server - close connection)\n \
                             [SERVER-COMMAND]->helpx (retrieve the help string)\n \
-                            [SERVER-COMMAND]->chat'username' (call a user - no spaces and no quotes in the command)\n \
-                            example: chatalice\n\n \
+                            [SERVER-COMMAND]->chat 'username' (call a user)\n \
+                            example: chat alice\n\n \
                             When Received a Chat Request:\n \
                             [SERVER-COMMAND]->acptx (to acept the call)\n \
                             [SERVER-COMMAND]->refux (to refuse the call)\n\n \
@@ -786,6 +788,7 @@ void* MessageApp_channel_Task(void *vargp)
         {
             printf("Handshake SUCCESS at Channel (%d) Connected (Secure) User: <%s>\n", channel, usr_data[channel].username);
             usr_data[channel].pending = 0; // start with no pendencies
+            usr_data[channel].caller_flag = 0;
             for (;;)
             {
                 /** Receive messages from logged Users */
@@ -820,6 +823,7 @@ void* MessageApp_channel_Task(void *vargp)
                                                 channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
                                                 channel_secure_send(channel, "reqtRequest Sent to Friend!", 27);
                                                 usr_data[channel].pending = 4; // pending 4 is calling...
+                                                usr_data[channel].caller_flag = 1;
                                                 usr_data[friend_channel].pending = 1; // pending 1 is received request...
                                                 usr_data[friend_channel].caller_ch = channel;
                                             }
@@ -836,76 +840,47 @@ void* MessageApp_channel_Task(void *vargp)
                         }
                         else {channel_secure_send(channel, "erroUsername Size incorrect", 27);}
                     }
-                    else if ((strncmp("acpt", rec_cmd, 4) == 0)&&(usr_data[channel].pending == 1)){ // User accepted connexion from friend - send each other public keys
-                        //in_chat_flag = 1;
-                        //if((client_msg_len-4)<16){
-                        friend_channel = usr_data[channel].caller_ch;
-                        //friend_channel = 0;
-                        //for(int n=0;n<MAX_CHANNELS;n++){ // search the friend username on the channels
-                        //    if ((strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0)&&(usr_data[friend_channel].username_len == strlen(data))){
+                    else if ((strncmp("acpt", rec_cmd, 4) == 0)&&(usr_data[channel].pending == 1)){ // User accepted chat from friend - send each other public keys
+                        caller_channel = usr_data[channel].caller_ch;
                         user_pubkey_len = get_user_pubkey_text(usr_data[channel].username, usr_data[channel].username_len, user_pubkey);                            
                         if(user_pubkey_len>0){
                             for(int i=0;i<4;i++){msg_to_send[i] = cmd_pubk[i];}
                             for(int i=0;i<user_pubkey_len;i++){msg_to_send[i+4] = user_pubkey[i];}
-                            channel_secure_send(friend_channel, msg_to_send, 4+user_pubkey_len);
-                            printf("Received acpt - Send Caller Ch (%d) friend pubkey\n", friend_channel);
+                            channel_secure_send(caller_channel, msg_to_send, 4+user_pubkey_len);
+                            printf("Received acpt - Send Caller Ch (%d) friend pubkey\n", caller_channel);
                             usr_data[channel].pending = 2; // reciever connected
-                            for (int i=0;i<2048;i++){user_pubkey[i]='\0';}
+                            for (int i=0;i<600;i++){user_pubkey[i]='\0';}
                             
-                            user_pubkey_len = get_user_pubkey_text(usr_data[friend_channel].username, usr_data[friend_channel].username_len, user_pubkey);
+                            user_pubkey_len = get_user_pubkey_text(usr_data[caller_channel].username, usr_data[caller_channel].username_len, user_pubkey);
                             if(user_pubkey_len>0){
                                 for(int i=0;i<user_pubkey_len;i++){msg_to_send[i+4] = user_pubkey[i];}
                                 channel_secure_send(channel, msg_to_send, 4+user_pubkey_len);
                                 printf("Received acpt - Send Receiver Ch (%d) friend pubkey\n", channel);
-                                usr_data[friend_channel].pending = 2; // caller conected
-                                for (int i=0;i<2048;i++){user_pubkey[i]='\0';}
+                                usr_data[caller_channel].pending = 2; // caller conected
+                                for (int i=0;i<600;i++){user_pubkey[i]='\0';}
                             }
                             else {
                                 channel_secure_send(channel, "erroFail to get Pubkeys", 22); 
                                 usr_data[channel].pending = 0;
-                                channel_secure_send(friend_channel, "erroFail to get Pubkeys", 22);
-                                usr_data[friend_channel].pending = 0;
+                                channel_secure_send(caller_channel, "erroFail to get Pubkeys", 22);
+                                usr_data[caller_channel].pending = 0;
                             }
                         }
                         else{
                             channel_secure_send(channel, "erroFail to get Pubkeys", 22);
                             usr_data[channel].pending = 0;
-                            channel_secure_send(friend_channel, "erroFail to get Pubkeys", 22);
-                            usr_data[friend_channel].pending = 0;    
-                        }
-                        //for (int i=0;i<2048;i++){user_pubkey[i]='\0';}
-                        //user_pubkey_len = get_user_pubkey_text(usr_data[friend_channel].username, usr_data[friend_channel].username_len, user_pubkey);                            
-                        //if(user_pubkey_len>0){
-                        //    for(int i=0;i<user_pubkey_len;i++){msg_to_send[i+4] = user_pubkey[i];}
-                        //    channel_secure_send(channel, msg_to_send, 4+user_pubkey_len);
-                        //    printf("received acpt Send Ch (%d) - (%d): %s\n", channel, 4+user_pubkey_len, user_pubkey);
-                        //    usr_data[friend_channel].pending = 2; // conected
-                        //}
-                        //else {
-                        //    channel_secure_send(channel, "erroFail to get Pubkeys", 22);usr_data[channel].pending = 0;
-                        //    channel_secure_send(channel, "erroFail to get Pubkeys", 22);usr_data[friend_channel].pending = 0;    
-                        //    break;}
-                        //break;
-                        //    //} 
-                        //    //else {friend_channel++;}
-                        ////}
-                        //printf("friend channel %d\n", friend_channel);
-                        //if (friend_channel==MAX_CHANNELS){channel_secure_send(channel, usr_data[channel].iv, usr_data[channel].key, "erroUsername not found", 22);}
-                        //}
-                        //else {channel_secure_send(channel, "erroUsername incorrect", 22);}                    
+                            channel_secure_send(caller_channel, "erroFail to get Pubkeys", 22);
+                            usr_data[caller_channel].pending = 0;    
+                        }                   
                     }
                     else if ((strncmp("refu", rec_cmd, 4) == 0)&&(usr_data[channel].pending == 1)){
-                        friend_channel = usr_data[channel].caller_ch;
-                        //for(int n=0;n<MAX_CHANNELS;n++){ // search the friend username on the channels
-                        //    if ((strncmp(data, usr_data[friend_channel].username, strlen(data)) == 0)&&(usr_data[friend_channel].username_len == strlen(data))){
-                        //        break;}
-                        //    else {friend_channel++;}
-                        //}
+                        caller_channel = usr_data[channel].caller_ch;
                         usr_data[channel].pending = 0;
-                        usr_data[friend_channel].pending = 0;
+                        usr_data[caller_channel].pending = 0;
+                        usr_data[caller_channel].caller_flag = 0;
                         for(int i=0;i<4;i++){msg_to_send[i] = cmd_refu[i];}
                         for(int i=0;i<usr_data[channel].username_len;i++){msg_to_send[i+4] = usr_data[channel].username[i];}
-                        channel_secure_send(friend_channel, msg_to_send, 4+usr_data[channel].username_len);
+                        channel_secure_send(caller_channel, msg_to_send, 4+usr_data[channel].username_len);
                     }
                     else if ((strncmp("cach", rec_cmd, 4) == 0)&&(usr_data[channel].pending == 4)){
                         usr_data[channel].pending = 0;
@@ -916,11 +891,21 @@ void* MessageApp_channel_Task(void *vargp)
                     else if ((strncmp("frwd", rec_cmd, 4) == 0)&&(usr_data[channel].pending == 2)){
                         for(int i=0;i<4;i++){msg_to_send[i] = cmd_frwd[i];}
                         for(int i=0;i<client_msg_len-4;i++){msg_to_send[i+4] = data[i];}
-                        if (usr_data[friend_channel].pending == 2){
-                            channel_secure_send(friend_channel, msg_to_send, client_msg_len);
-                            printf("received frwd Send Ch (%d) To Ch (%d) - (%ld)\n", channel, friend_channel, 4+usr_data[channel].username_len);
+                        if(usr_data[channel].caller_flag == 1){
+                            if (usr_data[friend_channel].pending == 2){
+                                channel_secure_send(friend_channel, msg_to_send, client_msg_len);
+                                printf("Caller frwd Send Ch (%d) To Ch (%d) - (%ld)\n", channel, friend_channel, 4+usr_data[channel].username_len);
+                            }
+                            else {channel_secure_send(channel, "erroFriend Disconected from Chat", 32);}
                         }
-                        else {channel_secure_send(channel, "erroFriend Disconected from Chat", 32);}
+                        else if(usr_data[channel].caller_flag == 0){
+                            if (usr_data[caller_channel].pending == 2){
+                                channel_secure_send(caller_channel, msg_to_send, client_msg_len);
+                                printf("Receiver caller frwd Send Ch (%d) To Ch (%d) - (%ld)\n", channel, caller_channel, 4+usr_data[channel].username_len);
+                            }
+                            else {channel_secure_send(channel, "erroFriend Disconected from Chat", 32);}
+                        }
+                        
                     }
                     else if (strncmp("list", rec_cmd, 4) == 0){
                         for(int i=0;i<4;i++){msg_to_send[i] = cmd_list[i];}
@@ -954,23 +939,44 @@ void* MessageApp_channel_Task(void *vargp)
                     else if (strncmp("exit", rec_cmd, 4) == 0){
                         printf("User Disconnected from Channel (%d)\n", channel);
                         if ((usr_data[channel].pending == 2)||(usr_data[channel].pending == 4)||(usr_data[channel].pending == 1)){
-                            friend_channel = usr_data[channel].caller_ch;
-                            usr_data[friend_channel].pending=0;
-                            channel_secure_send(friend_channel, "erroFriend Disconnected", 23);
+                            if(usr_data[channel].caller_flag == 1){
+                                //friend_channel = usr_data[channel].caller_ch;
+                                usr_data[friend_channel].pending=0;
+                                usr_data[friend_channel].caller_flag=0;
+                                channel_secure_send(friend_channel, "erroFriend Disconnected", 23);
+                            }
+                            else if(usr_data[channel].caller_flag == 0){
+                                caller_channel = usr_data[channel].caller_ch;
+                                usr_data[caller_channel].pending=0;
+                                usr_data[caller_channel].caller_flag=0;
+                                channel_secure_send(caller_channel, "erroFriend Disconnected", 23);
+                            }
                         } // disconect friend from chat
                         for (int i=0;i<16;i++){usr_data[channel].username[i] = '\0';} // remove user
                         close (usr_data[channel].connfd);
                         usr_data[channel].username_len = 0;
-                        usr_data[channel].pending =0;
+                        usr_data[channel].pending = 0;
+                        usr_data[channel].caller_flag = 0;
                         break;
                     }
                     else if ((strncmp("exch", rec_cmd, 4) == 0)&&(usr_data[channel].pending == 2)){
-                        usr_data[channel].pending = 0;
-                        usr_data[friend_channel].pending = 0;
-                        channel_secure_send(friend_channel, "erroFriend Disconnected from Chat", 33);
+                        if(usr_data[channel].caller_flag == 1){
+                            usr_data[channel].pending = 0;
+                            usr_data[channel].caller_flag = 0;
+                            usr_data[friend_channel].pending = 0;
+                            usr_data[friend_channel].caller_flag = 0;
+                            channel_secure_send(friend_channel, "erroFriend Disconnected from Chat", 33);
+                        }
+                        else if(usr_data[channel].caller_flag == 0){
+                            usr_data[channel].pending = 0;
+                            usr_data[channel].caller_flag = 0;
+                            usr_data[caller_channel].pending = 0;
+                            usr_data[caller_channel].caller_flag = 0;
+                            channel_secure_send(caller_channel, "erroFriend Disconnected from Chat", 33);
+                        }
                     }
                     else if (strncmp("help", rec_cmd, 4) == 0){
-                        channel_secure_send(friend_channel, help_string, strlen(help_string));
+                        channel_secure_send(channel, help_string, strlen(help_string));
                     }
                 }
                 else if (client_msg_len>0){
@@ -980,21 +986,32 @@ void* MessageApp_channel_Task(void *vargp)
                 else {
                     printf("DISCONNECTION in Channel (%d)\n", channel);
                     if ((usr_data[channel].pending == 2)||(usr_data[channel].pending == 4)||(usr_data[channel].pending == 1)){
-                        friend_channel = usr_data[channel].caller_ch;
-                        usr_data[friend_channel].pending=0;
-                        printf("Released friend in Channel (%d)\n", friend_channel);
-                        channel_secure_send(friend_channel, "erroFriend Disconnected", 23);
+                        if(usr_data[channel].caller_flag == 1){
+                            //friend_channel = usr_data[channel].caller_ch;
+                            usr_data[friend_channel].caller_flag = 0;
+                            usr_data[friend_channel].pending = 0;
+                            printf("Receiver Released in Channel (%d)\n", friend_channel);
+                            channel_secure_send(friend_channel, "erroFriend Disconnected", 23);
+                        }
+                        else if(usr_data[channel].caller_flag == 0){
+                            caller_channel = usr_data[channel].caller_ch;
+                            usr_data[caller_channel].caller_flag = 0;
+                            usr_data[caller_channel].pending = 0;
+                            printf("Caller Released in Channel (%d)\n", caller_channel);
+                            channel_secure_send(caller_channel, "erroFriend Disconnected", 23);
+                        }
                     } // disconect friend from chat
                     for (int i=0;i<16;i++){usr_data[channel].username[i] = '\0';}
                     usr_data[channel].username_len = 0;
                     usr_data[channel].pending = 0;
+                    usr_data[channel].caller_flag = 0;
                     close (usr_data[channel].connfd); 
                     break;
                 }
                 printf("Cleanup\n");
                 for (int i=0;i<MAX_BUFF;i++){data[i]='\0';}
                 for (int i=0;i<MAX_BUFF;i++){msg_to_send[i]='\0';}
-                for (int i=0;i<2048;i++){user_pubkey[i]='\0';}
+                //for (int i=0;i<2048;i++){user_pubkey[i]='\0';}
             }
         }
         printf("Client Exited Channel (%d)\n", channel);
